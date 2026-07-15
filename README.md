@@ -1,7 +1,7 @@
 # Legacy.Maliev.ContactService
 
 [![PR validation](https://github.com/MALIEV-Co-Ltd/Legacy.Maliev.ContactService/actions/workflows/pr-validation.yml/badge.svg)](https://github.com/MALIEV-Co-Ltd/Legacy.Maliev.ContactService/actions/workflows/pr-validation.yml)
-[![Main deployment](https://github.com/MALIEV-Co-Ltd/Legacy.Maliev.ContactService/actions/workflows/ci-main.yml/badge.svg)](https://github.com/MALIEV-Co-Ltd/Legacy.Maliev.ContactService/actions/workflows/ci-main.yml)
+[![Main CI](https://github.com/MALIEV-Co-Ltd/Legacy.Maliev.ContactService/actions/workflows/ci-main.yml/badge.svg)](https://github.com/MALIEV-Co-Ltd/Legacy.Maliev.ContactService/actions/workflows/ci-main.yml)
 
 Temporary .NET 10 compatibility service extracted from `maliev-web`. It preserves
 the legacy integer-key `Message` schema and `/Messages` JSON contract while the
@@ -36,6 +36,12 @@ credentials are required.
 
 This service does not modify the SQL Server source. PostgreSQL promotion requires
 the artifact-backed parity and cutover gates tracked in `MALIEV-Co-Ltd/maliev-web`.
+
+Deployment is intentionally validation-only until a dedicated
+`legacy-maliev-contact` Workload Identity Federation provider and
+`maliev-gitops/3-apps/_legacy-contact-service` manifest path exist. The existing
+`maliev-contact-service` GitOps path belongs to the new implementation and must
+not be overwritten by this legacy compatibility service.
 
 ## Validate
 

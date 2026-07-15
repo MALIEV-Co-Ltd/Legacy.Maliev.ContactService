@@ -1,4 +1,4 @@
-name: CI and deploy - Main
+name: CI - Main
 
 on:
   push:
@@ -6,7 +6,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,55 +14,3 @@ concurrency:
 jobs:
   validate:
     uses: ./.github/workflows/_build-and-test.yml
-
-  publish:
-    needs: validate
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
-        with:
-          persist-credentials: false
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
-        with:
-          repository: MALIEV-Co-Ltd/Maliev.Aspire
-          ref: 085f24b8b6b19c5a8e932b229d93421b03bcd032
-          path: .dependencies/Maliev.Aspire
-          persist-credentials: false
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
-        with:
-          repository: MALIEV-Co-Ltd/Maliev.MessagingContracts
-          ref: c533c12a8154f5cf7c4fbc9734e82a62705ac60f
-          path: .dependencies/Maliev.MessagingContracts
-          persist-credentials: false
-      - uses: google-github-actions/auth@v3
-        with:
-          workload_identity_provider: projects/1036965383273/locations/global/workloadIdentityPools/github/providers/legacy-maliev-contact
-          service_account: github-actions-artifact-writer@maliev-website.iam.gserviceaccount.com
-      - uses: google-github-actions/setup-gcloud@v3
-      - uses: imranismail/setup-kustomize@v3
-      - name: Build and push image
-        env:
-          IMAGE: asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-prod/legacy-contact-service:${{ github.sha }}
-        run: |
-          gcloud auth configure-docker asia-southeast1-docker.pkg.dev --quiet
-          docker build -f Legacy.Maliev.ContactService.Api/Dockerfile -t "$IMAGE" .
-          docker push "$IMAGE"
-      - name: Update GitOps through a pull request
-        env:
-          GH_TOKEN: ${{ secrets.GITOPS_PAT }}
-          IMAGE: asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-prod/legacy-contact-service:${{ github.sha }}
-        run: |
-          git clone https://x-access-token:${GH_TOKEN}@github.com/MALIEV-Co-Ltd/maliev-gitops.git gitops
-          cd gitops/3-apps/_legacy-contact-service/overlays/legacy
-          kustomize edit set image legacy-contact-service="$IMAGE"
-          cd ../../../..
-          branch="legacy-contact/${GITHUB_SHA}"
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git checkout -b "$branch"
-          git add 3-apps/_legacy-contact-service/overlays/legacy/kustomization.yaml
-          git commit -m "chore(legacy): deploy contact service ${GITHUB_SHA}"
-          git push origin "$branch"
-          gh pr create --repo MALIEV-Co-Ltd/maliev-gitops --base main --head "$branch" \
-            --title "chore(legacy): deploy contact service" \
-            --body "Deploys Legacy.Maliev.ContactService commit ${GITHUB_SHA} to maliev-legacy."
