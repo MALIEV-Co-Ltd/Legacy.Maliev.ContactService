@@ -18,7 +18,7 @@ credentials are required.
 
 | Purpose | Method | Route | Access |
 | --- | --- | --- | --- |
-| Legacy contact-message list | `GET` | `/Messages` | Anonymous |
+| Legacy contact-message list | `GET` | `/Messages` | `legacy-contact.messages.read` |
 | Legacy contact-message lookup | `GET` | `/Messages/{messageId}` | `legacy-contact.messages.read` |
 | Legacy contact-message create | `POST` | `/Messages` | `legacy-contact.messages.create` |
 | Legacy contact-message update | `PUT` | `/Messages/{messageId}` | `legacy-contact.messages.update` |
