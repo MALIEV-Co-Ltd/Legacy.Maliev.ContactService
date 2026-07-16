@@ -25,6 +25,6 @@ public sealed class ContactRequestDbContext(DbContextOptions<ContactRequestDbCon
         message.Property(entity => entity.MessageContent);
         message.Property(entity => entity.CreatedDate).HasColumnType("timestamp with time zone");
         message.Property(entity => entity.ModifiedDate).HasColumnType("timestamp with time zone");
-        message.Property<uint>("xmin").HasColumnType("xid").IsRowVersion();
+        message.Property<uint>("Version").IsRowVersion();
     }
 }
