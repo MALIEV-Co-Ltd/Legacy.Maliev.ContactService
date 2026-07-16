@@ -15,7 +15,7 @@ public sealed class ContactRequestsController(IContactService contactService) : 
 {
     /// <summary>Returns paginated contact messages using the legacy query contract.</summary>
     [HttpGet]
-    [AllowAnonymous]
+    [RequirePermission(ContactRequestPermissions.ContactRequestsRead)]
     [ProducesResponseType<PaginatedContactRequestResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PaginatedContactRequestResponse>> GetPaginatedAsync(
