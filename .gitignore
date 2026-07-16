@@ -10,3 +10,4 @@ TestResults/
 *.pem
 .env
 .dependencies/
+.worktrees/
