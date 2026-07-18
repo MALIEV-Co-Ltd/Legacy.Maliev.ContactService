@@ -76,7 +76,7 @@ public sealed class ContactRequestApplicationService(
         UpsertContactRequestRequest request,
         CancellationToken cancellationToken)
     {
-        var ContactRequest = await repository.GetByIdAsync(id, cancellationToken);
+        var ContactRequest = await repository.GetByIdForUpdateAsync(id, cancellationToken);
         if (ContactRequest is null)
         {
             return false;
@@ -98,7 +98,7 @@ public sealed class ContactRequestApplicationService(
     /// <inheritdoc />
     public async Task<bool> DeleteAsync(int id, CancellationToken cancellationToken)
     {
-        var ContactRequest = await repository.GetByIdAsync(id, cancellationToken);
+        var ContactRequest = await repository.GetByIdForUpdateAsync(id, cancellationToken);
         if (ContactRequest is null)
         {
             return false;

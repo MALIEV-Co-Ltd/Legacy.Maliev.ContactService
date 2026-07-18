@@ -14,6 +14,11 @@ public sealed class ContactRequestRepository(ContactRequestDbContext dbContext) 
 
     /// <inheritdoc />
     public Task<ContactRequest?> GetByIdAsync(int id, CancellationToken cancellationToken) =>
+        dbContext.Messages.AsNoTracking()
+            .SingleOrDefaultAsync(contactRequest => contactRequest.Id == id, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<ContactRequest?> GetByIdForUpdateAsync(int id, CancellationToken cancellationToken) =>
         dbContext.Messages.SingleOrDefaultAsync(contactRequest => contactRequest.Id == id, cancellationToken);
 
     /// <inheritdoc />
