@@ -1,3 +1,4 @@
+using Asp.Versioning;
 using Legacy.Maliev.ContactService.Api.Authorization;
 using Legacy.Maliev.ContactService.Application.Interfaces;
 using Legacy.Maliev.ContactService.Application.Models;
@@ -9,12 +10,14 @@ namespace Legacy.Maliev.ContactService.Api.Controllers;
 
 /// <summary>Preserves the legacy ContactRequest HTTP contract during migration.</summary>
 [ApiController]
+[ApiVersion("1.0")]
 [Route("Messages")]
 [Authorize]
 public sealed class ContactRequestsController(IContactService contactService) : ControllerBase
 {
     /// <summary>Returns paginated contact messages using the legacy query contract.</summary>
     [HttpGet]
+    [HttpGet("/messages/v{version:apiVersion}/contact-requests")]
     [RequirePermission(ContactRequestPermissions.ContactRequestsRead)]
     [ProducesResponseType<PaginatedContactRequestResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -36,6 +39,7 @@ public sealed class ContactRequestsController(IContactService contactService) : 
 
     /// <summary>Returns one ContactRequest by legacy identifier.</summary>
     [HttpGet("{messageId:int}", Name = "GetMessage")]
+    [HttpGet("/messages/v{version:apiVersion}/contact-requests/{messageId:int}", Name = "GetVersionedMessage")]
     [RequirePermission(ContactRequestPermissions.ContactRequestsRead)]
     public async Task<ActionResult<ContactRequestResponse>> GetContactRequestAsync(
         int messageId,
@@ -47,6 +51,7 @@ public sealed class ContactRequestsController(IContactService contactService) : 
 
     /// <summary>Creates a ContactRequest.</summary>
     [HttpPost]
+    [HttpPost("/messages/v{version:apiVersion}/contact-requests")]
     [RequirePermission(ContactRequestPermissions.ContactRequestsCreate)]
     public async Task<ActionResult> CreateContactRequestAsync(
         [FromBody] UpsertContactRequestRequest request,
@@ -58,6 +63,7 @@ public sealed class ContactRequestsController(IContactService contactService) : 
 
     /// <summary>Updates a ContactRequest.</summary>
     [HttpPut("{messageId:int}")]
+    [HttpPut("/messages/v{version:apiVersion}/contact-requests/{messageId:int}")]
     [RequirePermission(ContactRequestPermissions.ContactRequestsUpdate)]
     public async Task<ActionResult> UpdateContactRequestAsync(
         int messageId,
@@ -76,6 +82,7 @@ public sealed class ContactRequestsController(IContactService contactService) : 
 
     /// <summary>Deletes a ContactRequest.</summary>
     [HttpDelete("{messageId:int}")]
+    [HttpDelete("/messages/v{version:apiVersion}/contact-requests/{messageId:int}")]
     [RequirePermission(ContactRequestPermissions.ContactRequestsDelete)]
     public async Task<ActionResult> DeleteContactRequestAsync(int messageId, CancellationToken cancellationToken)
     {
