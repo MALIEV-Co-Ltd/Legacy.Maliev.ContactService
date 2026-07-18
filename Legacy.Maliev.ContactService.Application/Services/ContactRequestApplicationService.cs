@@ -18,26 +18,7 @@ public sealed class ContactRequestApplicationService(
         int? size,
         CancellationToken cancellationToken)
     {
-        var contactRequests = await repository.GetAllAsync(cancellationToken);
-        var query = ApplySearch(contactRequests, search);
-        query = ApplySort(query, sort);
-        var totalItems = query.Count;
-        var pageIndex = Math.Max(index ?? 1, 1);
-        var pageSize = Math.Max(size ?? totalItems, 1);
-        var totalPages = totalItems == 0 ? 0 : (int)Math.Ceiling(totalItems / (double)pageSize);
-        var items = query
-            .Skip((pageIndex - 1) * pageSize)
-            .Take(pageSize)
-            .Select(ToResponse)
-            .ToArray();
-
-        return new PaginatedContactRequestResponse(
-            items,
-            pageIndex,
-            totalPages,
-            totalItems,
-            pageIndex > 1,
-            pageIndex < totalPages);
+        return await repository.GetPaginatedAsync(sort, search, index, size, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -108,40 +89,6 @@ public sealed class ContactRequestApplicationService(
         await cache.InvalidateAsync(cancellationToken);
         return true;
     }
-
-    private static IReadOnlyList<ContactRequest> ApplySearch(
-        IReadOnlyList<ContactRequest> contactRequests,
-        string? search)
-    {
-        if (string.IsNullOrWhiteSpace(search))
-        {
-            return contactRequests;
-        }
-
-        var normalizedSearch = search.ToLowerInvariant();
-        return contactRequests.Where(contactRequest =>
-            contactRequest.Id.ToString().Contains(normalizedSearch, StringComparison.OrdinalIgnoreCase) ||
-            Contains(contactRequest.MessageContent, normalizedSearch) ||
-            Contains(contactRequest.LastName, normalizedSearch) ||
-            Contains(contactRequest.Company, normalizedSearch) ||
-            Contains(contactRequest.Email, normalizedSearch) ||
-            Contains(contactRequest.Telephone, normalizedSearch) ||
-            Contains(contactRequest.FirstName, normalizedSearch)).ToArray();
-    }
-
-    private static IReadOnlyList<ContactRequest> ApplySort(
-        IReadOnlyList<ContactRequest> contactRequests,
-        ContactRequestSortType? sort) =>
-        (sort switch
-        {
-            ContactRequestSortType.MessageId_Descending => contactRequests.OrderByDescending(contactRequest => contactRequest.Id),
-            ContactRequestSortType.MessageCreatedDate_Ascending => contactRequests.OrderBy(contactRequest => contactRequest.CreatedDate),
-            ContactRequestSortType.MessageCreatedDate_Descending => contactRequests.OrderByDescending(contactRequest => contactRequest.CreatedDate),
-            _ => contactRequests.OrderBy(contactRequest => contactRequest.Id),
-        }).ToArray();
-
-    private static bool Contains(string? value, string search) =>
-        value?.Contains(search, StringComparison.OrdinalIgnoreCase) == true;
 
     private static ContactRequestResponse ToResponse(ContactRequest contactRequest) => new(
         contactRequest.Id,

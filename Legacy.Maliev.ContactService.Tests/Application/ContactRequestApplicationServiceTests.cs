@@ -74,8 +74,45 @@ public sealed class ContactRequestApplicationServiceTests
     {
         private readonly List<ContactRequest> items = seed.ToList();
 
-        public Task<IReadOnlyList<ContactRequest>> GetAllAsync(CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<ContactRequest>>(items.ToArray());
+        public Task<PaginatedContactRequestResponse> GetPaginatedAsync(
+            ContactRequestSortType? sort,
+            string? search,
+            int? index,
+            int? size,
+            CancellationToken cancellationToken)
+        {
+            IEnumerable<ContactRequest> query = items;
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                query = query.Where(item =>
+                    item.Id.ToString().Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                    item.MessageContent?.Contains(search, StringComparison.OrdinalIgnoreCase) == true ||
+                    item.LastName?.Contains(search, StringComparison.OrdinalIgnoreCase) == true ||
+                    item.Company?.Contains(search, StringComparison.OrdinalIgnoreCase) == true ||
+                    item.Email?.Contains(search, StringComparison.OrdinalIgnoreCase) == true ||
+                    item.Telephone?.Contains(search, StringComparison.OrdinalIgnoreCase) == true ||
+                    item.FirstName?.Contains(search, StringComparison.OrdinalIgnoreCase) == true);
+            }
+
+            query = sort switch
+            {
+                ContactRequestSortType.MessageId_Descending => query.OrderByDescending(item => item.Id),
+                ContactRequestSortType.MessageCreatedDate_Ascending => query.OrderBy(item => item.CreatedDate),
+                ContactRequestSortType.MessageCreatedDate_Descending => query.OrderByDescending(item => item.CreatedDate),
+                _ => query.OrderBy(item => item.Id),
+            };
+            var filtered = query.ToArray();
+            var pageIndex = Math.Max(index ?? 1, 1);
+            var pageSize = Math.Max(size ?? filtered.Length, 1);
+            var totalPages = filtered.Length == 0 ? 0 : (int)Math.Ceiling(filtered.Length / (double)pageSize);
+            var page = filtered.Skip((pageIndex - 1) * pageSize).Take(pageSize)
+                .Select(item => new ContactRequestResponse(
+                    item.Id, item.FirstName, item.LastName, item.Company, item.Email, item.Telephone,
+                    item.Country, item.MessageContent, item.CreatedDate, item.ModifiedDate))
+                .ToArray();
+            return Task.FromResult(new PaginatedContactRequestResponse(
+                page, pageIndex, totalPages, filtered.Length, pageIndex > 1, pageIndex < totalPages));
+        }
 
         public Task<ContactRequest?> GetByIdAsync(int id, CancellationToken cancellationToken) =>
             Task.FromResult(items.SingleOrDefault(item => item.Id == id));
