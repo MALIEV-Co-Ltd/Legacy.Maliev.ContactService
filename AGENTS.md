@@ -30,7 +30,7 @@ gitleaks git . --redact=100 --exit-code 0 --no-banner --no-color
 ## Service conventions
 
 - Runtime: .NET 10.
-- OpenAPI UI: Scalar through `Maliev.Aspire.ServiceDefaults`; no Swashbuckle.
+- OpenAPI UI: Scalar through `Legacy.Maliev.ServiceDefaults` (compatibility namespace retained); no Swashbuckle.
 - Logging: built-in `ILogger<T>` only; do not reintroduce `Maliev.LoggerService`.
 - Cache: Redis keys must use the `legacy:contact:` prefix.
 - Auth: protected write/read-by-id endpoints use granular
