@@ -33,7 +33,7 @@ public sealed class ContactRequestApplicationService(
         UpsertContactRequestRequest request,
         CancellationToken cancellationToken)
     {
-        var now = timeProvider.GetUtcNow().UtcDateTime;
+        var now = UtcWallClockNow();
         var ContactRequest = new ContactRequest
         {
             FirstName = request.FirstName,
@@ -70,7 +70,7 @@ public sealed class ContactRequestApplicationService(
         ContactRequest.Telephone = request.Telephone;
         ContactRequest.Country = request.Country;
         ContactRequest.MessageContent = request.MessageContent;
-        ContactRequest.ModifiedDate = timeProvider.GetUtcNow().UtcDateTime;
+        ContactRequest.ModifiedDate = UtcWallClockNow();
         await repository.UpdateAsync(ContactRequest, cancellationToken);
         await cache.InvalidateAsync(cancellationToken);
         return true;
@@ -101,4 +101,7 @@ public sealed class ContactRequestApplicationService(
         contactRequest.MessageContent,
         contactRequest.CreatedDate,
         contactRequest.ModifiedDate);
+
+    private DateTime UtcWallClockNow() =>
+        DateTime.SpecifyKind(timeProvider.GetUtcNow().UtcDateTime, DateTimeKind.Unspecified);
 }
