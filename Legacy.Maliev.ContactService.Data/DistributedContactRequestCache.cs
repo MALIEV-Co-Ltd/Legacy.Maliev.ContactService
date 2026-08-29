@@ -24,7 +24,7 @@ public sealed class DistributedContactRequestCache(
                 ? null
                 : JsonSerializer.Deserialize<ContactRequestResponse[]>(bytes, JsonOptions);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
             logger?.LogWarning(exception, "ContactRequest cache read failed; falling back to PostgreSQL");
             return null;
@@ -45,7 +45,7 @@ public sealed class DistributedContactRequestCache(
                 new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(6) },
                 cancellationToken);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
             logger?.LogWarning(exception, "ContactRequest cache write failed; continuing without cache");
         }
@@ -58,7 +58,7 @@ public sealed class DistributedContactRequestCache(
         {
             await distributedCache.RemoveAsync(AllContactRequestsKey, cancellationToken);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
             logger?.LogWarning(exception, "ContactRequest cache invalidation failed");
         }

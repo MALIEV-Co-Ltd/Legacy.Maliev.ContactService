@@ -40,7 +40,9 @@ namespace Legacy.Maliev.ContactService.Data.Migrations
                         .HasColumnType("character varying(50)");
 
                     b.Property<DateTime?>("CreatedDate")
-                        .HasColumnType("timestamp with time zone");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP AT TIME ZONE 'UTC'");
 
                     b.Property<string>("Email")
                         .HasMaxLength(50)
@@ -58,7 +60,9 @@ namespace Legacy.Maliev.ContactService.Data.Migrations
                         .HasColumnType("text");
 
                     b.Property<DateTime?>("ModifiedDate")
-                        .HasColumnType("timestamp with time zone");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP AT TIME ZONE 'UTC'");
 
                     b.Property<string>("Telephone")
                         .HasMaxLength(50)

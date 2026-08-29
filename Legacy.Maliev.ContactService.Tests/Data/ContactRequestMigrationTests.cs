@@ -29,7 +29,7 @@ public sealed class ContactRequestMigrationTests
             FirstName = $"Customer {index:D2}",
             Email = $"customer-{index:D2}@example.invalid",
             MessageContent = "quote request",
-            CreatedDate = new DateTime(2026, 1, index, 0, 0, 0, DateTimeKind.Utc),
+            CreatedDate = new DateTime(2026, 1, index, 0, 0, 0, DateTimeKind.Unspecified),
         }));
         await context.SaveChangesAsync();
         context.ChangeTracker.Clear();
