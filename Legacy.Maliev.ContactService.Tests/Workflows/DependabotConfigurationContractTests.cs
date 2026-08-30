@@ -22,11 +22,10 @@ public sealed class DependabotConfigurationContractTests
     }
 
     [Fact]
-    public void NuGetUpdater_DefersCoordinatedEfAndNpgsqlRuntimeGraph()
+    public void NuGetUpdater_AllowsCoordinatedEfAndNpgsqlRuntimeGraph()
     {
         var source = ReadNuGetBlock();
 
-        Assert.Contains("MALIEV-Co-Ltd/Legacy.Maliev.ServiceDefaults#30", source, StringComparison.Ordinal);
         foreach (var dependency in new[]
                  {
                      "Microsoft.EntityFrameworkCore",
@@ -36,7 +35,7 @@ public sealed class DependabotConfigurationContractTests
                      "Npgsql.EntityFrameworkCore.PostgreSQL",
                  })
         {
-            Assert.Contains($"dependency-name: {dependency}", source, StringComparison.Ordinal);
+            Assert.DoesNotContain($"dependency-name: {dependency}", source, StringComparison.Ordinal);
         }
     }
 
