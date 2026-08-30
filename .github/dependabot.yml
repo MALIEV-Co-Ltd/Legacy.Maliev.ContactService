@@ -1,13 +1,24 @@
 version: 2
 updates:
   - package-ecosystem: nuget
-    directory: /
+    # Scan only graphs that restore without the unpublished shared package.
+    directories:
+      - /Legacy.Maliev.ContactService.Application
+      - /Legacy.Maliev.ContactService.Data
+      - /Legacy.Maliev.ContactService.Domain
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
     ignore:
       - dependency-name: Legacy.Maliev.ServiceDefaults
       - dependency-name: Legacy.Maliev.CompatibilityContracts
+      # EF/Npgsql must move with the pinned shared ServiceDefaults runtime graph.
+      # Tracking: MALIEV-Co-Ltd/Legacy.Maliev.ServiceDefaults#30.
+      - dependency-name: Microsoft.EntityFrameworkCore
+      - dependency-name: Microsoft.EntityFrameworkCore.Abstractions
+      - dependency-name: Microsoft.EntityFrameworkCore.Design
+      - dependency-name: Microsoft.EntityFrameworkCore.Relational
+      - dependency-name: Npgsql.EntityFrameworkCore.PostgreSQL
     groups:
       nuget-dependencies:
         applies-to: version-updates
