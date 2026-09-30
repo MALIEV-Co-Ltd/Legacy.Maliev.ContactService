@@ -53,6 +53,7 @@ public sealed class DistributedContactRequestCacheTests
     public async Task InvalidateAsync_does_not_swallow_cancellation()
     {
         using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
         var cache = new Mock<IDistributedCache>();
         cache.Setup(value => value.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException(cancellation.Token));

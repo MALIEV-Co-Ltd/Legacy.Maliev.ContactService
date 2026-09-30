@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Legacy.Maliev.ContactService.Application.Models;
 
 /// <summary>Legacy-compatible ContactRequest response.</summary>
@@ -18,6 +20,6 @@ public sealed record PaginatedContactRequestResponse(
     IReadOnlyList<ContactRequestResponse> Items,
     int PageIndex,
     int TotalPages,
-    int TotalItems,
+    [property: JsonPropertyName("totalRecords")] int TotalItems,
     bool HasPreviousPage,
     bool HasNextPage);

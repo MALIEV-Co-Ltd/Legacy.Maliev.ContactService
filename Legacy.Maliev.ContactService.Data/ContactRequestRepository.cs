@@ -85,14 +85,27 @@ public sealed class ContactRequestRepository(ContactRequestDbContext dbContext) 
     public async Task UpdateAsync(ContactRequest ContactRequest, CancellationToken cancellationToken)
     {
         dbContext.Messages.Update(ContactRequest);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        await SaveMutationAsync(cancellationToken);
     }
 
     /// <inheritdoc />
     public async Task DeleteAsync(ContactRequest ContactRequest, CancellationToken cancellationToken)
     {
         dbContext.Messages.Remove(ContactRequest);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        await SaveMutationAsync(cancellationToken);
+    }
+
+    private async Task SaveMutationAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException exception) when (
+            exception.Entries.Count > 0 && exception.Entries.All(entry => entry.Entity is ContactRequest))
+        {
+            throw new ContactRequestConcurrencyException(exception);
+        }
     }
 
     private static string EscapeLikePattern(string value) =>

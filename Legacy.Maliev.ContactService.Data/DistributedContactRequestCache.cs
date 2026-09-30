@@ -58,7 +58,7 @@ public sealed class DistributedContactRequestCache(
         {
             await distributedCache.RemoveAsync(AllContactRequestsKey, cancellationToken);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             logger?.LogWarning(exception, "ContactRequest cache invalidation failed");
         }
