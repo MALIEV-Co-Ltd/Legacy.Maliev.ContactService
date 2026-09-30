@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Legacy.Maliev.ContactService.Application.Interfaces;
 using Legacy.Maliev.ContactService.Application.Services;
 using Legacy.Maliev.ContactService.Data;
+using Legacy.Maliev.ContactService.Api.Documentation;
 using Maliev.Aspire.ServiceDefaults;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -16,6 +17,8 @@ builder.AddStandardMiddleware(options => options.EnableRequestLogging = true);
 builder.AddStandardOpenApi(
     title: "Legacy MALIEV ContactRequest Service API",
     description: "Temporary .NET 10 compatibility service preserving the legacy website contact message API contract.");
+// A local literal registration lets .NET consume this assembly's maintained XML comments.
+builder.Services.AddOpenApi("v1", ContactOpenApi.Configure);
 
 builder.Services.AddControllers().AddJsonOptions(options =>
     options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull);
