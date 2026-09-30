@@ -75,9 +75,16 @@ public sealed class ContactRequestsController(IContactService contactService) : 
             return BadRequest();
         }
 
-        return await contactService.UpdateAsync(messageId, request, cancellationToken)
-            ? NoContent()
-            : NotFound();
+        try
+        {
+            return await contactService.UpdateAsync(messageId, request, cancellationToken)
+                ? NoContent()
+                : NotFound();
+        }
+        catch (ContactRequestConcurrencyException)
+        {
+            return Conflict();
+        }
     }
 
     /// <summary>Deletes a ContactRequest.</summary>
@@ -86,8 +93,15 @@ public sealed class ContactRequestsController(IContactService contactService) : 
     [RequirePermission(ContactRequestPermissions.ContactRequestsDelete)]
     public async Task<ActionResult> DeleteContactRequestAsync(int messageId, CancellationToken cancellationToken)
     {
-        return await contactService.DeleteAsync(messageId, cancellationToken)
-            ? NoContent()
-            : NotFound();
+        try
+        {
+            return await contactService.DeleteAsync(messageId, cancellationToken)
+                ? NoContent()
+                : NotFound();
+        }
+        catch (ContactRequestConcurrencyException)
+        {
+            return Conflict();
+        }
     }
 }

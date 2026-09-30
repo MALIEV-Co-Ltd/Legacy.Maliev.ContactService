@@ -32,8 +32,8 @@ permission, DTO, and JSON contracts are unaffected.
 - Scalar: `/messages/scalar`
 - PostgreSQL database: `Message` on `legacy-postgres-main`
 - Redis key prefix: `legacy:contact:`
-- Public contact-message listing remains anonymous; protected operations require granular
-  `legacy-contact.messages.*` permissions.
+- Contact-message listing and CRUD are authenticated and require their granular
+  `legacy-contact.messages.*` permissions, including read permission for listing.
 
 This service does not modify the SQL Server source. PostgreSQL promotion requires
 the artifact-backed parity and cutover gates tracked in `MALIEV-Co-Ltd/maliev-web`.
