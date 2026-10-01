@@ -32,4 +32,8 @@
     <ProjectReference Include="..\Legacy.Maliev.ContactService.Domain\Legacy.Maliev.ContactService.Domain.csproj" />
   </ItemGroup>
 
+  <Target Name="PrepareContactAuthProof" BeforeTargets="PrepareForBuild" Condition="'$(DesignTimeBuild)' != 'true'">
+    <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildProjectDirectory)/../tooling/prepare-contact-auth-proof.ps1&quot;" Timeout="1000000" />
+  </Target>
+
 </Project>

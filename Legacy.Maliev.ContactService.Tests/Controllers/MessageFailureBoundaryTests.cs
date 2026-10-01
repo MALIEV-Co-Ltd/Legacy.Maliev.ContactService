@@ -57,7 +57,7 @@ public sealed class MessageFailureBoundaryTests
             builder.UseEnvironment("Testing");
             builder.UseSetting("Cache:RedisEnabled", "false");
             builder.UseSetting("ConnectionStrings:ContactRequestDbContext",
-                "Host=localhost;Database=unused;Username=unused;Password=unused");
+                "Host=localhost;Database=unused;Username=unused");
             builder.ConfigureLogging(logging => logging.AddProvider(logs));
             builder.ConfigureTestServices(services =>
             {
