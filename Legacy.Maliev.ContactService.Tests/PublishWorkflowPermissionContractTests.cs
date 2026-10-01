@@ -1,9 +1,53 @@
 using System.Text.RegularExpressions;
+using YamlDotNet.RepresentationModel;
 
 namespace Legacy.Maliev.ContactService.Tests;
 
 public sealed class PublishWorkflowPermissionContractTests
 {
+    [Fact]
+    public void PublishWorkflow_UsesReviewedExactMainValidationGuard()
+    {
+        var workflow = ReadWorkflow();
+        var jobs = (YamlMappingNode)workflow.Children[new YamlScalarNode("jobs")];
+        var publish = (YamlMappingNode)jobs.Children[new YamlScalarNode("publish")];
+
+        Assert.Equal("MALIEV-Co-Ltd/Legacy.Maliev.Workflows/.github/workflows/publish-image.yml@503e8846390a597c267d2889b33a9c26863389b3",
+            ((YamlScalarNode)publish.Children[new YamlScalarNode("uses")]).Value);
+        Assert.Equal("vars.LEGACY_DEPLOY_ENABLED == 'true'",
+            ((YamlScalarNode)publish.Children[new YamlScalarNode("if")]).Value);
+        var inputs = (YamlMappingNode)publish.Children[new YamlScalarNode("with")];
+        Assert.Equal(8, inputs.Children.Count);
+        Assert.Equal("003b255f0fb0f0bce032f5b5ff15d28be0c8c391",
+            ((YamlScalarNode)inputs.Children[new YamlScalarNode("legacy-service-defaults-ref")]).Value);
+        Assert.Equal("78e48ffc4ee000df0510cba5e7c7a3c4c4d539d7",
+            ((YamlScalarNode)inputs.Children[new YamlScalarNode("compatibility-contracts-ref")]).Value);
+    }
+
+    [Fact]
+    public void PublishWorkflow_GrantsOnlyRequiredJobLocalPermissions()
+    {
+        var workflow = ReadWorkflow();
+        var permissions = (YamlMappingNode)workflow.Children[new YamlScalarNode("permissions")];
+        Assert.Single(permissions.Children);
+        Assert.Equal("read", ((YamlScalarNode)permissions.Children[new YamlScalarNode("contents")]).Value);
+        var jobs = (YamlMappingNode)workflow.Children[new YamlScalarNode("jobs")];
+        var publish = (YamlMappingNode)jobs.Children[new YamlScalarNode("publish")];
+        var jobPermissions = (YamlMappingNode)publish.Children[new YamlScalarNode("permissions")];
+        Assert.Equal(3, jobPermissions.Children.Count);
+        Assert.Equal("read", ((YamlScalarNode)jobPermissions.Children[new YamlScalarNode("contents")]).Value);
+        Assert.Equal("read", ((YamlScalarNode)jobPermissions.Children[new YamlScalarNode("actions")]).Value);
+        Assert.Equal("write", ((YamlScalarNode)jobPermissions.Children[new YamlScalarNode("id-token")]).Value);
+    }
+
+    private static YamlMappingNode ReadWorkflow()
+    {
+        var stream = new YamlStream();
+        using var reader = File.OpenText(Path.Combine(FindRoot(), ".github", "workflows", "publish-image.yml"));
+        stream.Load(reader);
+        return Assert.IsType<YamlMappingNode>(Assert.Single(stream.Documents).RootNode);
+    }
+
     [Fact]
     public void PublishWorkflow_ScopesOidcToPublishJobs()
     {
