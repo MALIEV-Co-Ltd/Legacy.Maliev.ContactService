@@ -81,6 +81,38 @@ public sealed class ContactDocumentationAcceptanceTests(ContactRuntimePostgresFi
         || path.Equals("/Messages/{messageId}", StringComparison.OrdinalIgnoreCase)
         || path.Contains("/contact-requests", StringComparison.OrdinalIgnoreCase);
 
+    [Fact]
+    public async Task Documentation_ExplainsQueriesAndActualEmptyPageResponse()
+    {
+        await using var parent = new ContactRuntimeFactory(postgres.ConnectionString);
+        await using var factory = parent.WithWebHostBuilder(builder => builder.UseEnvironment("Development"));
+        using var client = Client(factory);
+        using var body = JsonDocument.Parse(await client.GetStringAsync("/messages/openapi/v1.json"));
+        foreach (var path in body.RootElement.GetProperty("paths").EnumerateObject())
+        {
+            if (!IsContactPath(path.Name) || path.Name.Contains('{')) continue;
+            var operation = path.Value.GetProperty("get");
+            foreach (var name in new[] { "sort", "search", "index", "size" })
+            {
+                var parameter = Assert.Single(operation.GetProperty("parameters").EnumerateArray(), item => item.GetProperty("name").GetString() == name);
+                Assert.True(parameter.TryGetProperty("description", out var description) && !string.IsNullOrWhiteSpace(description.GetString()));
+            }
+            Assert.Equal("No messages exist on the selected page.", operation.GetProperty("responses").GetProperty("404").GetProperty("description").GetString());
+        }
+    }
+
+    [Fact]
+    public async Task Documentation_ExplainsCreatePayloadWithoutIdentityOrStorageSecrets()
+    {
+        await using var parent = new ContactRuntimeFactory(postgres.ConnectionString);
+        await using var factory = parent.WithWebHostBuilder(builder => builder.UseEnvironment("Development"));
+        using var client = Client(factory);
+        using var body = JsonDocument.Parse(await client.GetStringAsync("/messages/openapi/v1.json"));
+        var operation = body.RootElement.GetProperty("paths").GetProperty("/Messages").GetProperty("post");
+        Assert.True(operation.GetProperty("requestBody").TryGetProperty("description", out var description));
+        Assert.Contains("contact details", description.GetString(), StringComparison.Ordinal);
+    }
+
     private static HttpClient Client(WebApplicationFactory<Program> factory) => factory.CreateClient(new()
     {
         BaseAddress = new Uri("https://localhost"),
