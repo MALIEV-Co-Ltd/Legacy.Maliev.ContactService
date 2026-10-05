@@ -16,6 +16,14 @@ namespace Legacy.Maliev.ContactService.Api.Controllers;
 public sealed class ContactRequestsController(IContactService contactService) : ControllerBase
 {
     /// <summary>Returns paginated contact messages using the legacy query contract.</summary>
+    /// <remarks>Reading contact details requires the existing contact-message read permission.</remarks>
+    /// <param name="sort" example="0">The legacy contact-message sort value.</param>
+    /// <param name="search" example="enquiry">Text to search in the contact message fields.</param>
+    /// <param name="index" example="1">The one-based page index; omitted values use the existing default.</param>
+    /// <param name="size" example="10">The page size; omitted values use the existing default.</param>
+    /// <param name="cancellationToken">Request cancellation.</param>
+    /// <response code="200">The selected page of contact messages.</response>
+    /// <response code="404">No messages exist on the selected page.</response>
     [HttpGet]
     [HttpGet("/messages/v{version:apiVersion}/contact-requests")]
     [RequirePermission(ContactRequestPermissions.ContactRequestsRead)]
@@ -38,6 +46,8 @@ public sealed class ContactRequestsController(IContactService contactService) : 
     }
 
     /// <summary>Returns one ContactRequest by legacy identifier.</summary>
+    /// <param name="messageId" example="42">The identifier of the contact message to retrieve.</param>
+    /// <param name="cancellationToken">Request cancellation.</param>
     [HttpGet("{messageId:int}", Name = "GetMessage")]
     [HttpGet("/messages/v{version:apiVersion}/contact-requests/{messageId:int}", Name = "GetVersionedMessage")]
     [RequirePermission(ContactRequestPermissions.ContactRequestsRead)]
@@ -50,6 +60,8 @@ public sealed class ContactRequestsController(IContactService contactService) : 
     }
 
     /// <summary>Creates a ContactRequest.</summary>
+    /// <param name="request">The contact details and message content to store; identifiers and timestamps are assigned by the service.</param>
+    /// <param name="cancellationToken">Request cancellation.</param>
     [HttpPost]
     [HttpPost("/messages/v{version:apiVersion}/contact-requests")]
     [RequirePermission(ContactRequestPermissions.ContactRequestsCreate)]
@@ -62,6 +74,9 @@ public sealed class ContactRequestsController(IContactService contactService) : 
     }
 
     /// <summary>Updates a ContactRequest.</summary>
+    /// <param name="messageId" example="42">The identifier of the contact message to update.</param>
+    /// <param name="request">The replacement contact details and message content.</param>
+    /// <param name="cancellationToken">Request cancellation.</param>
     [HttpPut("{messageId:int}")]
     [HttpPut("/messages/v{version:apiVersion}/contact-requests/{messageId:int}")]
     [RequirePermission(ContactRequestPermissions.ContactRequestsUpdate)]
@@ -88,6 +103,8 @@ public sealed class ContactRequestsController(IContactService contactService) : 
     }
 
     /// <summary>Deletes a ContactRequest.</summary>
+    /// <param name="messageId" example="42">The identifier of the contact message to delete.</param>
+    /// <param name="cancellationToken">Request cancellation.</param>
     [HttpDelete("{messageId:int}")]
     [HttpDelete("/messages/v{version:apiVersion}/contact-requests/{messageId:int}")]
     [RequirePermission(ContactRequestPermissions.ContactRequestsDelete)]
