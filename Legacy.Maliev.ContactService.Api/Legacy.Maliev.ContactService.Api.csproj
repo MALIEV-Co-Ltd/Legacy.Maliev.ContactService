@@ -2,7 +2,6 @@
 
   <ItemGroup>
     <AdditionalFiles Include="Documentation/ContactPayload.xml" />
-    <EmbeddedResource Include="Documentation/ContactPayload.xml" />
   </ItemGroup>
 
   <PropertyGroup>

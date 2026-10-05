@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.OpenApi;
 using Microsoft.OpenApi;
-using System.Xml.Linq;
 
 namespace Legacy.Maliev.ContactService.Api.Documentation;
 
@@ -9,22 +8,6 @@ internal static class ContactOpenApi
 {
     internal static void Configure(OpenApiOptions options)
     {
-        // The XML generator consumes record summaries but the served positional
-        // record properties still lack their maintained comments. Apply the same
-        // XML input at schema generation, without changing the payload records.
-        using var payloadComments = typeof(ContactOpenApi).Assembly.GetManifestResourceStream(
-            "Legacy.Maliev.ContactService.Api.Documentation.ContactPayload.xml")!;
-        var fieldDescriptions = XDocument.Load(payloadComments).Descendants("member")
-            .Where(member => member.Attribute("name")!.Value.StartsWith("P:", StringComparison.Ordinal))
-            .ToDictionary(member => member.Attribute("name")!.Value.Split('.').Last(),
-                member => member.Element("summary")!.Value.Trim(), StringComparer.OrdinalIgnoreCase);
-        options.AddSchemaTransformer((schema, context, cancellationToken) =>
-        {
-            if (context.JsonPropertyInfo is { } property
-                && fieldDescriptions.TryGetValue(property.Name, out var description))
-                schema.Description = description;
-            return Task.CompletedTask;
-        });
         options.AddOperationTransformer((operation, context, cancellationToken) =>
         {
             var metadata = context.Description.ActionDescriptor.EndpointMetadata;
