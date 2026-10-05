@@ -48,9 +48,13 @@ public sealed class ContactRequestsController(IContactService contactService) : 
     /// <summary>Returns one ContactRequest by legacy identifier.</summary>
     /// <param name="messageId" example="42">The identifier of the contact message to retrieve.</param>
     /// <param name="cancellationToken">Request cancellation.</param>
+    /// <response code="200">The requested contact message.</response>
+    /// <response code="404">The contact message does not exist.</response>
     [HttpGet("{messageId:int}", Name = "GetMessage")]
     [HttpGet("/messages/v{version:apiVersion}/contact-requests/{messageId:int}", Name = "GetVersionedMessage")]
     [RequirePermission(ContactRequestPermissions.ContactRequestsRead)]
+    [ProducesResponseType<ContactRequestResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ContactRequestResponse>> GetContactRequestAsync(
         int messageId,
         CancellationToken cancellationToken)
@@ -62,9 +66,11 @@ public sealed class ContactRequestsController(IContactService contactService) : 
     /// <summary>Creates a ContactRequest.</summary>
     /// <param name="request">The contact details and message content to store; identifiers and timestamps are assigned by the service.</param>
     /// <param name="cancellationToken">Request cancellation.</param>
+    /// <response code="201">The created contact message, with its service-assigned identifier.</response>
     [HttpPost]
     [HttpPost("/messages/v{version:apiVersion}/contact-requests")]
     [RequirePermission(ContactRequestPermissions.ContactRequestsCreate)]
+    [ProducesResponseType<ContactRequestResponse>(StatusCodes.Status201Created)]
     public async Task<ActionResult> CreateContactRequestAsync(
         [FromBody] UpsertContactRequestRequest request,
         CancellationToken cancellationToken)
@@ -77,9 +83,17 @@ public sealed class ContactRequestsController(IContactService contactService) : 
     /// <param name="messageId" example="42">The identifier of the contact message to update.</param>
     /// <param name="request">The replacement contact details and message content.</param>
     /// <param name="cancellationToken">Request cancellation.</param>
+    /// <response code="204">The contact message was updated.</response>
+    /// <response code="400">The contact message identifier is invalid.</response>
+    /// <response code="404">The contact message does not exist.</response>
+    /// <response code="409">The contact message changed during this request.</response>
     [HttpPut("{messageId:int}")]
     [HttpPut("/messages/v{version:apiVersion}/contact-requests/{messageId:int}")]
     [RequirePermission(ContactRequestPermissions.ContactRequestsUpdate)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult> UpdateContactRequestAsync(
         int messageId,
         [FromBody] UpsertContactRequestRequest request,
@@ -105,9 +119,15 @@ public sealed class ContactRequestsController(IContactService contactService) : 
     /// <summary>Deletes a ContactRequest.</summary>
     /// <param name="messageId" example="42">The identifier of the contact message to delete.</param>
     /// <param name="cancellationToken">Request cancellation.</param>
+    /// <response code="204">The contact message was deleted.</response>
+    /// <response code="404">The contact message does not exist.</response>
+    /// <response code="409">The contact message changed during this request.</response>
     [HttpDelete("{messageId:int}")]
     [HttpDelete("/messages/v{version:apiVersion}/contact-requests/{messageId:int}")]
     [RequirePermission(ContactRequestPermissions.ContactRequestsDelete)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult> DeleteContactRequestAsync(int messageId, CancellationToken cancellationToken)
     {
         try

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <!-- Positional records keep their legacy constructor and JSON shape. These
+       property comments describe the public payload without replacing records. -->
+  <members>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.FirstName">
+      <summary>The caller's given name, when supplied.</summary>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.LastName">
+      <summary>The caller's family name, when supplied.</summary>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.Company">
+      <summary>The caller's company, when supplied.</summary>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.Email">
+      <summary>The email address supplied for replying to the message.</summary>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.Telephone">
+      <summary>The telephone number supplied for contacting the caller.</summary>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.Country">
+      <summary>The country text supplied by the caller.</summary>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.MessageContent">
+      <summary>The caller's enquiry or message text.</summary>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.ContactRequestResponse.CreatedDate">
+      <summary>The stored creation timestamp, omitted when the legacy record has none.</summary>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.ContactRequestResponse.ModifiedDate">
+      <summary>The stored modification timestamp, omitted when the legacy record has none.</summary>
+    </member>
+  </members>
+</doc>
