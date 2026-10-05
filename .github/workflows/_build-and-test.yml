@@ -39,6 +39,21 @@ jobs:
         with:
           solution: Legacy.Maliev.ContactService.slnx
           use-local-maliev-dependencies: 'true'
+      - name: Preserve owned generated source and PDB evidence
+        if: always()
+        shell: bash
+        run: |
+          api="Legacy.Maliev.ContactService.Api"
+          target="runner-results/compiler-evidence"
+          mkdir -p "$target"
+          if [ -d "$api/obj/Release/net10.0" ]; then
+            find "$api/obj/Release/net10.0" -name 'OpenApiXmlCommentSupport.generated.cs' -type f -exec cp --parents '{}' "$target" \;
+          fi
+          pdb="$api/bin/Release/net10.0/$api.pdb"
+          if [ -f "$pdb" ]; then
+            cp --parents "$pdb" "$target"
+          fi
+          find "$target" -type f -exec sha256sum '{}' \; > runner-results/compiler-evidence-sha256.txt
       - name: Gate owned production coverage
         run: python3 scripts/verify-runner-coverage.py runner-results
       - name: Preserve validation evidence
