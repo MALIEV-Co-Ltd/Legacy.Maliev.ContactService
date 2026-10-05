@@ -227,11 +227,11 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
     }
 
     [Theory]
-    [InlineData("/Messages", 0)]
-    [InlineData("/Messages", -1)]
-    [InlineData("/messages/v1/contact-requests", 0)]
-    [InlineData("/messages/v1/contact-requests", -1)]
-    public async Task Update_NonpositiveIdentifierReturnsBadRequestWithoutChangingStoredMessages(string route, int invalidId)
+    [InlineData("/Messages", 0, HttpStatusCode.NotFound)]
+    [InlineData("/Messages", -1, HttpStatusCode.NotFound)]
+    [InlineData("/messages/v1/contact-requests", 0, HttpStatusCode.BadRequest)]
+    [InlineData("/messages/v1/contact-requests", -1, HttpStatusCode.BadRequest)]
+    public async Task Update_NonpositiveIdentifierPreservesRouteStatusWithoutChangingStoredMessages(string route, int invalidId, HttpStatusCode expectedStatus)
     {
         await postgres.ResetAsync();
         await using var factory = new ContactRuntimeFactory(postgres.ConnectionString);
@@ -242,7 +242,7 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
 
         using var response = await client.PutAsJsonAsync($"{route}/{invalidId}", new { MessageContent = "must-not-persist" });
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(expectedStatus, response.StatusCode);
         await using var afterDb = postgres.CreateContext();
         var after = await afterDb.Messages.AsNoTracking().SingleAsync();
         Assert.Equal(id, after.Id);

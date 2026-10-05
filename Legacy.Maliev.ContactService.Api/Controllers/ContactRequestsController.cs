@@ -84,7 +84,7 @@ public sealed class ContactRequestsController(IContactService contactService) : 
     /// <param name="request">The replacement contact details and message content.</param>
     /// <param name="cancellationToken">Request cancellation.</param>
     /// <response code="204">The contact message was updated.</response>
-    /// <response code="400">The contact message identifier is invalid.</response>
+    /// <response code="400">The request body is invalid, or the versioned contact message identifier is nonpositive.</response>
     /// <response code="404">The contact message does not exist.</response>
     /// <response code="409">The contact message changed during this request.</response>
     [HttpPut("{messageId:int}")]
@@ -99,7 +99,7 @@ public sealed class ContactRequestsController(IContactService contactService) : 
         [FromBody] UpsertContactRequestRequest request,
         CancellationToken cancellationToken)
     {
-        if (messageId <= 0)
+        if (messageId <= 0 && ControllerContext.RouteData.Values.ContainsKey("version"))
         {
             return BadRequest();
         }
