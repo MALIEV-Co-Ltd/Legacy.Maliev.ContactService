@@ -30,8 +30,15 @@ internal static class ContactOpenApi
             {
                 if (path.Operations is null) continue;
                 foreach (var operation in path.Operations.Values)
+                {
                     if (operation.Security is { Count: > 0 })
                         operation.Security = [new OpenApiSecurityRequirement { [new OpenApiSecuritySchemeReference("Bearer", document)] = [] }];
+                    // XML parameter processing can replace the body description with
+                    // the CancellationToken comment. All body operations use the
+                    // existing contact-request create/update payload.
+                    if (operation.RequestBody is not null)
+                        operation.RequestBody.Description = "The contact details and message content supplied by the caller; identifiers and timestamps are managed by the service.";
+                }
             }
             return Task.CompletedTask;
         });
