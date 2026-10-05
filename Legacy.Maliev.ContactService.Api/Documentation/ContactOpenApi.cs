@@ -17,7 +17,7 @@ internal static class ContactOpenApi
         var fieldDescriptions = XDocument.Load(payloadComments).Descendants("member")
             .Where(member => member.Attribute("name")!.Value.StartsWith("P:", StringComparison.Ordinal))
             .ToDictionary(member => member.Attribute("name")!.Value.Split('.').Last(),
-                member => member.Element("summary")!.Value.Trim(), StringComparer.Ordinal);
+                member => member.Element("summary")!.Value.Trim(), StringComparer.OrdinalIgnoreCase);
         options.AddSchemaTransformer((schema, context, cancellationToken) =>
         {
             if (context.JsonPropertyInfo is { } property

@@ -134,15 +134,15 @@ public sealed class ContactDocumentationAcceptanceTests(ContactRuntimePostgresFi
         var schemas = body.RootElement.GetProperty("components").GetProperty("schemas");
         var request = schemas.GetProperty("UpsertContactRequestRequest");
         Assert.Equal("Legacy-compatible ContactRequest create and update payload.", request.GetProperty("description").GetString());
-        foreach (var name in new[] { "FirstName", "LastName", "Company", "Email", "Telephone", "Country", "MessageContent" })
+        foreach (var name in new[] { "firstName", "lastName", "company", "email", "telephone", "country", "messageContent" })
         {
             Assert.True(request.GetProperty("properties").TryGetProperty(name, out var field), $"Missing legacy field {name}: {request}");
             Assert.True(field.TryGetProperty("description", out var description) && !string.IsNullOrWhiteSpace(description.GetString()),
                 $"Missing maintained description for {name}: {request}");
         }
-        Assert.False(request.GetProperty("properties").TryGetProperty("Id", out _));
+        Assert.False(request.GetProperty("properties").TryGetProperty("id", out _));
         var responseProperties = schemas.GetProperty("ContactRequestResponse").GetProperty("properties");
-        foreach (var name in new[] { "CreatedDate", "ModifiedDate" })
+        foreach (var name in new[] { "createdDate", "modifiedDate" })
             Assert.True(responseProperties.TryGetProperty(name, out var field) && field.TryGetProperty("description", out var description)
                 && !string.IsNullOrWhiteSpace(description.GetString()), $"Missing maintained timestamp description for {name}: {responseProperties}");
     }
