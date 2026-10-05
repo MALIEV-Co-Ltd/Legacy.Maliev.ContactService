@@ -113,6 +113,35 @@ public sealed class ContactDocumentationAcceptanceTests(ContactRuntimePostgresFi
         Assert.Contains("contact details", description.GetString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Documentation_DescribesExistingMutationResultsAndPayloadSchemas()
+    {
+        await using var parent = new ContactRuntimeFactory(postgres.ConnectionString);
+        await using var factory = parent.WithWebHostBuilder(builder => builder.UseEnvironment("Development"));
+        using var client = Client(factory);
+        using var body = JsonDocument.Parse(await client.GetStringAsync("/messages/openapi/v1.json"));
+        var paths = body.RootElement.GetProperty("paths");
+        var created = paths.GetProperty("/Messages").GetProperty("post").GetProperty("responses").GetProperty("201");
+        Assert.Equal("The created contact message, with its service-assigned identifier.", created.GetProperty("description").GetString());
+        Assert.True(created.TryGetProperty("content", out var content) && content.TryGetProperty("application/json", out _));
+        var item = paths.GetProperty("/Messages/{messageId}");
+        foreach (var method in new[] { "put", "delete" })
+        {
+            var responses = item.GetProperty(method).GetProperty("responses");
+            foreach (var status in new[] { "204", "404", "409" })
+                Assert.False(string.IsNullOrWhiteSpace(responses.GetProperty(status).GetProperty("description").GetString()));
+        }
+        var schemas = body.RootElement.GetProperty("components").GetProperty("schemas");
+        var request = schemas.GetProperty("UpsertContactRequestRequest");
+        Assert.Equal("Legacy-compatible ContactRequest create and update payload.", request.GetProperty("description").GetString());
+        foreach (var name in new[] { "FirstName", "LastName", "Company", "Email", "Telephone", "Country", "MessageContent" })
+            Assert.False(string.IsNullOrWhiteSpace(request.GetProperty("properties").GetProperty(name).GetProperty("description").GetString()));
+        Assert.False(request.GetProperty("properties").TryGetProperty("Id", out _));
+        var responseProperties = schemas.GetProperty("ContactRequestResponse").GetProperty("properties");
+        Assert.False(string.IsNullOrWhiteSpace(responseProperties.GetProperty("CreatedDate").GetProperty("description").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(responseProperties.GetProperty("ModifiedDate").GetProperty("description").GetString()));
+    }
+
     private static HttpClient Client(WebApplicationFactory<Program> factory) => factory.CreateClient(new()
     {
         BaseAddress = new Uri("https://localhost"),
