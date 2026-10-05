@@ -3,6 +3,15 @@
   <!-- Positional records keep their legacy constructor and JSON shape. These
        property comments describe the public payload without replacing records. -->
   <members>
+    <member name="T:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest">
+      <summary>Legacy-compatible ContactRequest create and update payload.</summary>
+    </member>
+    <member name="T:Legacy.Maliev.ContactService.Application.Models.ContactRequestResponse">
+      <summary>Legacy-compatible ContactRequest response.</summary>
+    </member>
+    <member name="T:Legacy.Maliev.ContactService.Application.Models.PaginatedContactRequestResponse">
+      <summary>Legacy-compatible paginated Web API response shape.</summary>
+    </member>
     <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.FirstName">
       <summary>The caller's given name, when supplied.</summary>
     </member>
