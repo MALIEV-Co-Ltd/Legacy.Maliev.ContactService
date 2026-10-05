@@ -135,11 +135,16 @@ public sealed class ContactDocumentationAcceptanceTests(ContactRuntimePostgresFi
         var request = schemas.GetProperty("UpsertContactRequestRequest");
         Assert.Equal("Legacy-compatible ContactRequest create and update payload.", request.GetProperty("description").GetString());
         foreach (var name in new[] { "FirstName", "LastName", "Company", "Email", "Telephone", "Country", "MessageContent" })
-            Assert.False(string.IsNullOrWhiteSpace(request.GetProperty("properties").GetProperty(name).GetProperty("description").GetString()));
+        {
+            Assert.True(request.GetProperty("properties").TryGetProperty(name, out var field), $"Missing legacy field {name}: {request}");
+            Assert.True(field.TryGetProperty("description", out var description) && !string.IsNullOrWhiteSpace(description.GetString()),
+                $"Missing maintained description for {name}: {request}");
+        }
         Assert.False(request.GetProperty("properties").TryGetProperty("Id", out _));
         var responseProperties = schemas.GetProperty("ContactRequestResponse").GetProperty("properties");
-        Assert.False(string.IsNullOrWhiteSpace(responseProperties.GetProperty("CreatedDate").GetProperty("description").GetString()));
-        Assert.False(string.IsNullOrWhiteSpace(responseProperties.GetProperty("ModifiedDate").GetProperty("description").GetString()));
+        foreach (var name in new[] { "CreatedDate", "ModifiedDate" })
+            Assert.True(responseProperties.TryGetProperty(name, out var field) && field.TryGetProperty("description", out var description)
+                && !string.IsNullOrWhiteSpace(description.GetString()), $"Missing maintained timestamp description for {name}: {responseProperties}");
     }
 
     private static HttpClient Client(WebApplicationFactory<Program> factory) => factory.CreateClient(new()
