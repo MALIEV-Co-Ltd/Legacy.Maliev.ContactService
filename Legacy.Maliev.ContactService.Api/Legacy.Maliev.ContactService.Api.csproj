@@ -10,7 +10,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <EmitCompilerGeneratedFiles Condition="'$(GITHUB_ACTIONS)' == 'true'">true</EmitCompilerGeneratedFiles>
+    <EmitCompilerGeneratedFiles Condition="'$(GITHUB_RUN_ID)' != ''">true</EmitCompilerGeneratedFiles>
     <InterceptorsNamespaces>$(InterceptorsNamespaces);Microsoft.AspNetCore.OpenApi.Generated</InterceptorsNamespaces>
     <SharedLibraryVersion Condition="'$(SharedLibraryVersion)' == ''">1.0.*-*</SharedLibraryVersion>
   </PropertyGroup>
@@ -27,5 +27,16 @@
     <ProjectReference Include="..\Legacy.Maliev.ContactService.Application\Legacy.Maliev.ContactService.Application.csproj" />
     <ProjectReference Include="..\Legacy.Maliev.ContactService.Data\Legacy.Maliev.ContactService.Data.csproj" />
   </ItemGroup>
+
+  <Target Name="PreserveHostedCompilerEvidence" AfterTargets="Build"
+          Condition="'$(GITHUB_RUN_ID)' != '' And '$(Configuration)' == 'Release' And '$(VSTestResultsDirectory)' != ''">
+    <ItemGroup>
+      <OwnedCompilerEvidence Include="$(BaseIntermediateOutputPath)**/OpenApiXmlCommentSupport.generated.cs" />
+      <OwnedCompilerEvidence Include="$(TargetDir)$(AssemblyName).pdb" Condition="Exists('$(TargetDir)$(AssemblyName).pdb')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(OwnedCompilerEvidence)"
+          DestinationFolder="$(VSTestResultsDirectory)/compiler-evidence/$(MSBuildProjectName)"
+          SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>
