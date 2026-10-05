@@ -92,6 +92,52 @@ public sealed class StartupFailureAcceptanceTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
+    [Theory]
+    [InlineData("malformed")]
+    [InlineData("missing-root")]
+    public async Task Actual_entrypoint_in_process_contains_configuration_failure_and_preserves_private_report(string phase)
+    {
+        var root = Path.Combine(Path.GetTempPath(), Sentinel + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "appsettings.json"), "{ invalid-" + Sentinel);
+        var previous = Environment.ExitCode;
+        var oldOut = Console.Out;
+        var oldError = Console.Error;
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        try
+        {
+            Environment.ExitCode = 37;
+            Console.SetOut(stdout);
+            Console.SetError(stderr);
+            var entry = typeof(Program).Assembly.EntryPoint ?? throw new InvalidOperationException("API entry point missing.");
+            var contentRoot = phase == "missing-root" ? Path.Combine(root, Sentinel) : root;
+            var returned = entry.Invoke(null, [new[] { "--environment=Production", "--contentRoot=" + contentRoot }]);
+            if (returned is Task task) await task.WaitAsync(TimeSpan.FromSeconds(20));
+            Assert.Equal(1, Environment.ExitCode);
+            Assert.Equal(string.Empty, stdout.ToString());
+            var output = stderr.ToString();
+            Assert.DoesNotContain(Sentinel, output, StringComparison.Ordinal);
+            Assert.DoesNotContain("Unhandled exception", output, StringComparison.OrdinalIgnoreCase);
+            var line = Assert.Single(output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            using var json = JsonDocument.Parse(line);
+            Assert.Equal(5102, json.RootElement.GetProperty("eventId").GetInt32());
+            Assert.Equal("StartupFailure", json.RootElement.GetProperty("EventName").GetString());
+            Assert.Equal("HostInitialization", json.RootElement.GetProperty("Operation").GetString());
+            Assert.Equal("CRITICAL", json.RootElement.GetProperty("severity").GetString());
+            Assert.False(json.RootElement.TryGetProperty("StackTrace", out _));
+            Assert.False(json.RootElement.TryGetProperty("State", out _));
+            Assert.False(json.RootElement.TryGetProperty("Scopes", out _));
+        }
+        finally
+        {
+            Console.SetOut(oldOut);
+            Console.SetError(oldError);
+            Environment.ExitCode = previous;
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static Dictionary<string, string?> Settings()
     {
         using var rsa = RSA.Create(2048);
