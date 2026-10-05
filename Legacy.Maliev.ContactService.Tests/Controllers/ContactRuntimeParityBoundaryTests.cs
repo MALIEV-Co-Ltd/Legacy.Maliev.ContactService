@@ -204,6 +204,31 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
     [Theory]
     [InlineData("/Messages", 0)]
     [InlineData("/Messages", -1)]
+    [InlineData("/messages", 0)]
+    [InlineData("/messages", -1)]
+    public async Task LegacyUpdate_MissingNonpositiveIdentifierPreservesSourceNotFound(string route, int missingId)
+    {
+        await postgres.ResetAsync();
+        await using var factory = new ContactRuntimeFactory(postgres.ConnectionString);
+        using var client = factory.AuthenticatedClient();
+        var id = await CreateAsync(client, route, "source-must-remain");
+        await using var beforeDb = postgres.CreateContext();
+        var before = await beforeDb.Messages.AsNoTracking().SingleAsync();
+
+        using var response = await client.PutAsJsonAsync($"{route}/{missingId}", new { MessageContent = "must-not-persist" });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        await using var afterDb = postgres.CreateContext();
+        var after = await afterDb.Messages.AsNoTracking().SingleAsync();
+        Assert.Equal(id, after.Id);
+        Assert.Equal(before.MessageContent, after.MessageContent);
+        Assert.Equal(before.CreatedDate, after.CreatedDate);
+        Assert.Equal(before.ModifiedDate, after.ModifiedDate);
+    }
+
+    [Theory]
+    [InlineData("/Messages", 0)]
+    [InlineData("/Messages", -1)]
     [InlineData("/messages/v1/contact-requests", 0)]
     [InlineData("/messages/v1/contact-requests", -1)]
     public async Task Update_NonpositiveIdentifierReturnsBadRequestWithoutChangingStoredMessages(string route, int invalidId)
