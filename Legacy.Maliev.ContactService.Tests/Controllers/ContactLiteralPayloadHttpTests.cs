@@ -78,6 +78,58 @@ public sealed class ContactLiteralPayloadHttpTests(ContactRuntimePostgresFixture
         Assert.Equal(id, finalJson.RootElement.GetProperty("id").GetInt32());
     }
 
+    [Theory]
+    [InlineData("MessageCreatedDate_Ascending", false)]
+    [InlineData("MessageCreatedDate_Descending", true)]
+    public async Task NullableCreatedDateSort_PreservesSourceNullPlacementAcrossPages(string sort, bool descending)
+    {
+        await postgres.ResetAsync();
+        await using var db = postgres.CreateContext();
+        var undated = new Legacy.Maliev.ContactService.Domain.ContactRequest { MessageContent = "Undated fixture" };
+        var earliest = new Legacy.Maliev.ContactService.Domain.ContactRequest { MessageContent = "Earliest fixture", CreatedDate = new DateTime(2020, 1, 1) };
+        var middle = new Legacy.Maliev.ContactService.Domain.ContactRequest { MessageContent = "Middle fixture", CreatedDate = new DateTime(2020, 1, 2) };
+        var latest = new Legacy.Maliev.ContactService.Domain.ContactRequest { MessageContent = "Latest fixture", CreatedDate = new DateTime(2020, 1, 3) };
+        db.Messages.AddRange(middle, undated, latest, earliest);
+        await db.SaveChangesAsync();
+        await db.Messages.Where(message => message.Id == undated.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(message => message.CreatedDate, (DateTime?)null));
+        Assert.Null(await db.Messages.AsNoTracking().Where(message => message.Id == undated.Id)
+            .Select(message => message.CreatedDate).SingleAsync());
+        var before = await db.Messages.AsNoTracking().OrderBy(message => message.Id).ToArrayAsync();
+        var expected = descending
+            ? new[] { latest.Id, middle.Id, earliest.Id, undated.Id }
+            : new[] { undated.Id, earliest.Id, middle.Id, latest.Id };
+        await using var factory = new ContactRuntimeFactory(postgres.ConnectionString);
+        using var client = factory.AuthenticatedClient();
+        foreach (var route in new[] { "/Messages", "/messages/v1/contact-requests" })
+        {
+            using var response = await client.GetAsync($"{route}?sort={sort}&index=1&size=4");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var items = json.RootElement.GetProperty("items").EnumerateArray().ToArray();
+            Assert.Equal(expected, items.Select(item => item.GetProperty("id").GetInt32()).ToArray());
+            Assert.Equal(4, json.RootElement.GetProperty("totalRecords").GetInt32());
+            Assert.False(items.Single(item => item.GetProperty("id").GetInt32() == undated.Id).TryGetProperty("createdDate", out _));
+            for (var index = 1; index <= expected.Length; index++)
+            {
+                using var pageResponse = await client.GetAsync($"{route}?sort={sort}&index={index}&size=1");
+                Assert.Equal(HttpStatusCode.OK, pageResponse.StatusCode);
+                using var pageJson = JsonDocument.Parse(await pageResponse.Content.ReadAsStringAsync());
+                var page = pageJson.RootElement;
+                Assert.Equal(index, page.GetProperty("pageIndex").GetInt32());
+                Assert.Equal(4, page.GetProperty("totalRecords").GetInt32());
+                Assert.Equal(4, page.GetProperty("totalPages").GetInt32());
+                Assert.Equal(index > 1, page.GetProperty("hasPreviousPage").GetBoolean());
+                Assert.Equal(index < 4, page.GetProperty("hasNextPage").GetBoolean());
+                Assert.Equal(expected[index - 1], Assert.Single(page.GetProperty("items").EnumerateArray()).GetProperty("id").GetInt32());
+            }
+            using var beyond = await client.GetAsync($"{route}?sort={sort}&index=5&size=1");
+            Assert.Equal(HttpStatusCode.NotFound, beyond.StatusCode);
+        }
+        var after = await db.Messages.AsNoTracking().OrderBy(message => message.Id).ToArrayAsync();
+        Assert.Equal(JsonSerializer.Serialize(before), JsonSerializer.Serialize(after));
+    }
+
     private static Dictionary<string, object?> Fields(string? value) => new()
     {
         ["FirstName"] = value,

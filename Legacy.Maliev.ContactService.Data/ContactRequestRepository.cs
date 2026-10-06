@@ -37,8 +37,8 @@ public sealed class ContactRequestRepository(ContactRequestDbContext dbContext) 
         query = sort switch
         {
             ContactRequestSortType.MessageId_Descending => query.OrderByDescending(contactRequest => contactRequest.Id),
-            ContactRequestSortType.MessageCreatedDate_Ascending => query.OrderBy(contactRequest => contactRequest.CreatedDate),
-            ContactRequestSortType.MessageCreatedDate_Descending => query.OrderByDescending(contactRequest => contactRequest.CreatedDate),
+            ContactRequestSortType.MessageCreatedDate_Ascending => query.OrderBy(contactRequest => contactRequest.CreatedDate != null).ThenBy(contactRequest => contactRequest.CreatedDate),
+            ContactRequestSortType.MessageCreatedDate_Descending => query.OrderBy(contactRequest => contactRequest.CreatedDate == null).ThenByDescending(contactRequest => contactRequest.CreatedDate),
             _ => query.OrderBy(contactRequest => contactRequest.Id),
         };
         var items = await query
