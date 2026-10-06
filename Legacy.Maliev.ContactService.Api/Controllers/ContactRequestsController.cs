@@ -68,10 +68,12 @@ public sealed class ContactRequestsController(IContactService contactService) : 
     /// <param name="cancellationToken">Request cancellation.</param>
     /// <returns>The created contact message, with its service-assigned identifier.</returns>
     /// <response code="201">The created contact message, with its service-assigned identifier.</response>
+    /// <response code="400">Malformed JSON or an invalid request body returns validation problem details without creating a message.</response>
     [HttpPost]
     [HttpPost("/messages/v{version:apiVersion}/contact-requests")]
     [RequirePermission(ContactRequestPermissions.ContactRequestsCreate)]
     [ProducesResponseType<ContactRequestResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest, "application/problem+json")]
     public async Task<ActionResult> CreateContactRequestAsync(
         [FromBody] UpsertContactRequestRequest request,
         CancellationToken cancellationToken)
@@ -81,6 +83,7 @@ public sealed class ContactRequestsController(IContactService contactService) : 
     }
 
     /// <summary>Updates a ContactRequest.</summary>
+    /// <description>Replaces the seven caller-supplied fields; omitted or null fields are cleared. The identifier and creation timestamp are preserved, and the modification timestamp is updated.</description>
     /// <param name="messageId" example="42">The identifier of the contact message to update.</param>
     /// <param name="request" example="{&quot;firstName&quot;:&quot;Example&quot;,&quot;lastName&quot;:&quot;Customer&quot;,&quot;company&quot;:&quot;Example company&quot;,&quot;email&quot;:&quot;customer@example.invalid&quot;,&quot;telephone&quot;:&quot;0000000000&quot;,&quot;country&quot;:&quot;Thailand&quot;,&quot;messageContent&quot;:&quot;Please quote the revised part.&quot;}">The replacement contact details and message content.</param>
     /// <param name="cancellationToken">Request cancellation.</param>
