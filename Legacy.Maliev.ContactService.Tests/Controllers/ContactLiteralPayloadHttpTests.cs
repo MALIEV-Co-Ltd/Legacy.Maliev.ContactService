@@ -11,6 +11,26 @@ public sealed class ContactLiteralPayloadCollection;
 [Collection("Contact literal payload")]
 public sealed class ContactLiteralPayloadHttpTests(ContactRuntimePostgresFixture postgres) : IClassFixture<ContactRuntimePostgresFixture>
 {
+    [Fact]
+    public async Task Scaffold_ActualEfPreviewBuildAndGeneratedQueriesPreserveMigratedOwnedMessage()
+    {
+        await postgres.ResetAsync();
+        await using var context = postgres.CreateContext();
+        var row = new Legacy.Maliev.ContactService.Domain.ContactRequest
+        {
+            FirstName = "Scaffold",
+            LastName = "Contact",
+            Company = "Fixture company",
+            Email = "scaffold@example.test",
+            Telephone = "000",
+            Country = "Thailand",
+            MessageContent = "synthetic scaffold message"
+        };
+        context.Messages.Add(row);
+        await context.SaveChangesAsync();
+        await ContactScaffoldRuntimeProof.RunAsync(postgres, row.Id);
+    }
+
     [Theory]
     [InlineData("/Messages", "")]
     [InlineData("/Messages", "  Literal value  ")]
