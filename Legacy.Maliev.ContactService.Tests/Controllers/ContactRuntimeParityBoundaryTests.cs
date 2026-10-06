@@ -15,8 +15,10 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.IdentityModel.Tokens;
@@ -28,6 +30,232 @@ namespace Legacy.Maliev.ContactService.Tests.Controllers;
 public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixture postgres)
     : IClassFixture<ContactRuntimePostgresFixture>
 {
+    private const string PipelineAllowedOrigin = "https://contact-pipeline.example.test";
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ProductionPipeline_PreflightPrecedesProtectedMutationAuthorization(bool allowed)
+    {
+        await using var parent = new ContactRuntimeFactory(postgres.ConnectionString);
+        await using var host = NewPipelineHost(parent);
+        AssertProductionPipelinePolicy(host);
+        using var client = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
+        Assert.Null(client.DefaultRequestHeaders.Authorization);
+        using var request = new HttpRequestMessage(HttpMethod.Options, "/Messages/1");
+        request.Headers.Add("Origin", allowed ? PipelineAllowedOrigin : "https://blocked.example.invalid");
+        request.Headers.Add("Access-Control-Request-Method", "PUT");
+        request.Headers.Add("Access-Control-Request-Headers", "authorization,content-type");
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        if (allowed)
+        {
+            Assert.Equal(PipelineAllowedOrigin, Assert.Single(response.Headers.GetValues("Access-Control-Allow-Origin")));
+            Assert.Equal("true", Assert.Single(response.Headers.GetValues("Access-Control-Allow-Credentials")));
+            Assert.Contains("PUT", response.Headers.GetValues("Access-Control-Allow-Methods"));
+            var headers = string.Join(",", response.Headers.GetValues("Access-Control-Allow-Headers"));
+            Assert.Contains("authorization", headers, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("content-type", headers, StringComparison.OrdinalIgnoreCase);
+        }
+        else
+        {
+            Assert.False(response.Headers.Contains("Access-Control-Allow-Origin"));
+            Assert.False(response.Headers.Contains("Access-Control-Allow-Credentials"));
+        }
+    }
+
+    [Fact]
+    public async Task ProductionPipeline_AnonymousMutationIncludesConfiguredCorsOnUnauthorizedResponse()
+    {
+        await postgres.ResetAsync();
+        await using var parent = new ContactRuntimeFactory(postgres.ConnectionString);
+        await using var host = NewPipelineHost(parent);
+        AssertProductionPipelinePolicy(host);
+        using var client = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
+        using var request = new HttpRequestMessage(HttpMethod.Put, "/Messages/1")
+        {
+            Content = new StringContent("{}", Encoding.UTF8, "application/json")
+        };
+        request.Headers.Add("Origin", PipelineAllowedOrigin);
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal(PipelineAllowedOrigin, Assert.Single(response.Headers.GetValues("Access-Control-Allow-Origin")));
+        Assert.Equal("true", Assert.Single(response.Headers.GetValues("Access-Control-Allow-Credentials")));
+        await using var db = postgres.CreateContext();
+        Assert.Equal(0, await db.Messages.CountAsync());
+    }
+
+    [Theory]
+    [InlineData("liveness")]
+    [InlineData("readiness")]
+    public async Task ProductionPipeline_HealthyProbesRemainAnonymousWithSanitizedReadiness(string probe)
+    {
+        await using var parent = new ContactRuntimeFactory(postgres.ConnectionString);
+        await using var host = NewPipelineHost(parent);
+        AssertProductionPipelinePolicy(host);
+        using var client = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
+        Assert.Null(client.DefaultRequestHeaders.Authorization);
+        using var response = await client.GetAsync("/messages/" + probe);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        if (probe == "liveness")
+        {
+            Assert.Equal("Healthy", body);
+            return;
+        }
+        Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+        using var json = JsonDocument.Parse(body);
+        AssertReadinessShape(json.RootElement, "Healthy");
+        Assert.NotEmpty(json.RootElement.GetProperty("checks").EnumerateObject());
+        Assert.All(json.RootElement.GetProperty("checks").EnumerateObject(), check =>
+            Assert.Equal("Healthy", check.Value.GetProperty("status").GetString()));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProductionPipeline_ControlledDependencyFailureReturnsSanitized503WithHealthyLiveness(bool throwFailure)
+    {
+        const string privateMarker = "private-contact-readiness-marker";
+        await using var parent = new ContactRuntimeFactory(postgres.ConnectionString);
+        await using var host = NewPipelineHost(parent, services => services.AddHealthChecks().AddCheck("controlled-readiness", () =>
+        {
+            if (throwFailure) throw new InvalidOperationException(privateMarker);
+            return HealthCheckResult.Unhealthy(privateMarker, new InvalidOperationException(privateMarker),
+                new Dictionary<string, object> { ["private-diagnostic"] = privateMarker });
+        }));
+        AssertProductionPipelinePolicy(host);
+        using var client = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
+        Assert.Null(client.DefaultRequestHeaders.Authorization);
+        using var response = await client.GetAsync("/messages/readiness");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(privateMarker, body, StringComparison.Ordinal);
+        Assert.DoesNotContain("private-diagnostic", body, StringComparison.Ordinal);
+        using var json = JsonDocument.Parse(body);
+        AssertReadinessShape(json.RootElement, "Unhealthy");
+        Assert.Equal("Unhealthy", json.RootElement.GetProperty("checks").GetProperty("controlled-readiness").GetProperty("status").GetString());
+        using var liveness = await client.GetAsync("/messages/liveness");
+        Assert.Equal(HttpStatusCode.OK, liveness.StatusCode);
+        Assert.Equal("Healthy", await liveness.Content.ReadAsStringAsync());
+    }
+
+    private static WebApplicationFactory<Program> NewPipelineHost(ContactRuntimeFactory parent, Action<IServiceCollection>? configureServices = null) =>
+        parent.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("CORS:AllowedOrigins:0", PipelineAllowedOrigin);
+            builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
+                new Dictionary<string, string?> { ["CORS:AllowedOrigins:0"] = PipelineAllowedOrigin }));
+            builder.ConfigureTestServices(services => configureServices?.Invoke(services));
+        });
+
+    private static void AssertProductionPipelinePolicy(WebApplicationFactory<Program> host)
+    {
+        Assert.Equal("Production", host.Services.GetRequiredService<IWebHostEnvironment>().EnvironmentName);
+        Assert.Contains(PipelineAllowedOrigin, host.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Cors.Infrastructure.CorsOptions>>()
+            .Value.GetPolicy("__DefaultCorsPolicy")!.Origins);
+    }
+
+    private static void AssertReadinessShape(JsonElement root, string status)
+    {
+        Assert.Equal(new[] { "checks", "status", "totalDuration" }, root.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal(status, root.GetProperty("status").GetString());
+        Assert.True(root.GetProperty("totalDuration").GetDouble() >= 0);
+        foreach (var check in root.GetProperty("checks").EnumerateObject())
+        {
+            Assert.Equal(new[] { "duration", "status" }, check.Value.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal).ToArray());
+            Assert.True(check.Value.GetProperty("duration").GetDouble() >= 0);
+        }
+    }
+
+    [Theory]
+    [InlineData("/Messages", "firstName")]
+    [InlineData("/Messages", "lastName")]
+    [InlineData("/Messages", "company")]
+    [InlineData("/Messages", "email")]
+    [InlineData("/Messages", "telephone")]
+    [InlineData("/Messages", "messageContent")]
+    [InlineData("/messages/v1/contact-requests", "firstName")]
+    [InlineData("/messages/v1/contact-requests", "lastName")]
+    [InlineData("/messages/v1/contact-requests", "company")]
+    [InlineData("/messages/v1/contact-requests", "email")]
+    [InlineData("/messages/v1/contact-requests", "telephone")]
+    [InlineData("/messages/v1/contact-requests", "messageContent")]
+    public async Task SourceSearch_AllTextFieldsPreserveLiteralCharactersAndSignificantSpaces(string route, string field)
+    {
+        foreach (var search in new[] { "%", "_", "\\", "ข้อความ", "  Padded  " })
+        {
+            await postgres.ResetAsync();
+            await using var db = postgres.CreateContext();
+            var matched = new ContactRequest();
+            var unrelated = new ContactRequest();
+            SetSourceSearchField(matched, field, "Prefix" + search + "Suffix");
+            SetSourceSearchField(unrelated, field, search == "  Padded  " ? "Padded" : "Unrelated");
+            db.Messages.AddRange(matched, unrelated);
+            await db.SaveChangesAsync();
+            await using var factory = new ContactRuntimeFactory(postgres.ConnectionString);
+            using var client = factory.AuthenticatedClient();
+            using var response = await client.GetAsync(route + "?search=" + Uri.EscapeDataString(search));
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal(1, json.RootElement.GetProperty("totalRecords").GetInt32());
+            var item = Assert.Single(json.RootElement.GetProperty("items").EnumerateArray());
+            Assert.Equal(matched.Id, item.GetProperty("id").GetInt32());
+            Assert.Equal("Prefix" + search + "Suffix", item.GetProperty(field).GetString());
+            Assert.Equal(2, await db.Messages.CountAsync());
+        }
+    }
+
+    [Theory]
+    [InlineData("/Messages")]
+    [InlineData("/messages/v1/contact-requests")]
+    public async Task SourceSearch_IdUsesSubstringRatherThanNumericEquality(string route)
+    {
+        await postgres.ResetAsync();
+        await using var db = postgres.CreateContext();
+        db.Messages.AddRange(new ContactRequest { Id = 21001 }, new ContactRequest { Id = 31001 }, new ContactRequest { Id = 777 });
+        await db.SaveChangesAsync();
+        await using var factory = new ContactRuntimeFactory(postgres.ConnectionString);
+        using var client = factory.AuthenticatedClient();
+        using var response = await client.GetAsync(route + "?search=100");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(2, json.RootElement.GetProperty("totalRecords").GetInt32());
+        Assert.Equal(new[] { 21001, 31001 }, json.RootElement.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("id").GetInt32()).ToArray());
+        Assert.Equal(3, await db.Messages.CountAsync());
+    }
+
+    [Theory]
+    [InlineData("/Messages")]
+    [InlineData("/messages/v1/contact-requests")]
+    public async Task SourceSearch_DoesNotExpandToCountry(string route)
+    {
+        await postgres.ResetAsync();
+        await using var db = postgres.CreateContext();
+        db.Messages.Add(new ContactRequest { Country = "OnlyExcludedMarker" });
+        await db.SaveChangesAsync();
+        await using var factory = new ContactRuntimeFactory(postgres.ConnectionString);
+        using var client = factory.AuthenticatedClient();
+        using var response = await client.GetAsync(route + "?search=OnlyExcludedMarker");
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal("OnlyExcludedMarker", (await db.Messages.AsNoTracking().SingleAsync()).Country);
+    }
+
+    private static void SetSourceSearchField(ContactRequest message, string field, string value)
+    {
+        switch (field)
+        {
+            case "firstName": message.FirstName = value; break;
+            case "lastName": message.LastName = value; break;
+            case "company": message.Company = value; break;
+            case "email": message.Email = value; break;
+            case "telephone": message.Telephone = value; break;
+            case "messageContent": message.MessageContent = value; break;
+            default: throw new ArgumentOutOfRangeException(nameof(field));
+        }
+    }
+
     [Theory]
     [InlineData("/Messages")]
     [InlineData("/messages/v1/contact-requests")]
