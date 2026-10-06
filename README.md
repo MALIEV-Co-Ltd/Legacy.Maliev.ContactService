@@ -53,3 +53,13 @@ dotnet test --no-build
 dotnet format Legacy.Maliev.ContactService.slnx --verify-no-changes --no-restore
 dotnet list package --vulnerable --include-transitive
 ```
+
+
+## Actual external scaffold proof
+
+`Legacy.Maliev.ContactService.Data/ScaffoldContext.ps1` generates a distinct
+Message preview in a new external directory using the named connection and
+prebuilt Release graph. The API's private Design reference defaults off and
+is enabled only for isolated tooling builds. The hosted regression reuses the
+disposable PostgreSQL fixture; see `docs/contact-actual-scaffold-proof-20261006.md`
+for scope and pending validation.
