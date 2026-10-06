@@ -64,8 +64,9 @@ public sealed class ContactRequestsController(IContactService contactService) : 
     }
 
     /// <summary>Creates a ContactRequest.</summary>
-    /// <param name="request">The contact details and message content to store; identifiers and timestamps are assigned by the service.</param>
+    /// <param name="request" example="{&quot;firstName&quot;:&quot;Example&quot;,&quot;lastName&quot;:&quot;Customer&quot;,&quot;company&quot;:&quot;Example company&quot;,&quot;email&quot;:&quot;customer@example.invalid&quot;,&quot;telephone&quot;:&quot;0000000000&quot;,&quot;country&quot;:&quot;Thailand&quot;,&quot;messageContent&quot;:&quot;Please quote this part.&quot;}">The contact details and message content to store; identifiers and timestamps are assigned by the service.</param>
     /// <param name="cancellationToken">Request cancellation.</param>
+    /// <returns>The created contact message, with its service-assigned identifier.</returns>
     /// <response code="201">The created contact message, with its service-assigned identifier.</response>
     [HttpPost]
     [HttpPost("/messages/v{version:apiVersion}/contact-requests")]
@@ -81,7 +82,7 @@ public sealed class ContactRequestsController(IContactService contactService) : 
 
     /// <summary>Updates a ContactRequest.</summary>
     /// <param name="messageId" example="42">The identifier of the contact message to update.</param>
-    /// <param name="request">The replacement contact details and message content.</param>
+    /// <param name="request" example="{&quot;firstName&quot;:&quot;Example&quot;,&quot;lastName&quot;:&quot;Customer&quot;,&quot;company&quot;:&quot;Example company&quot;,&quot;email&quot;:&quot;customer@example.invalid&quot;,&quot;telephone&quot;:&quot;0000000000&quot;,&quot;country&quot;:&quot;Thailand&quot;,&quot;messageContent&quot;:&quot;Please quote the revised part.&quot;}">The replacement contact details and message content.</param>
     /// <param name="cancellationToken">Request cancellation.</param>
     /// <response code="204">The contact message was updated.</response>
     /// <response code="400">The request body is invalid, or the versioned contact message identifier is nonpositive.</response>

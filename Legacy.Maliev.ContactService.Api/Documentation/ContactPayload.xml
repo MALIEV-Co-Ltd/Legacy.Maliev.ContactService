@@ -5,6 +5,7 @@
   <members>
     <member name="T:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest">
       <summary>Legacy-compatible ContactRequest create and update payload.</summary>
+      <example>{"firstName":"Example","lastName":"Customer","company":"Example company","email":"customer@example.invalid","telephone":"0000000000","country":"Thailand","messageContent":"Please quote this part."}</example>
     </member>
     <member name="T:Legacy.Maliev.ContactService.Application.Models.ContactRequestResponse">
       <summary>Legacy-compatible ContactRequest response.</summary>
@@ -14,12 +15,15 @@
     </member>
     <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.FirstName">
       <summary>The caller's given name, when supplied.</summary>
+      <example>"Example"</example>
     </member>
     <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.LastName">
       <summary>The caller's family name, when supplied.</summary>
     </member>
     <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.Company">
       <summary>The caller's company, when supplied.</summary>
+      <value>Free-form caller-supplied text; this does not create or link a company record.</value>
+      <example>"Example company"</example>
     </member>
     <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.Email">
       <summary>The email address supplied for replying to the message.</summary>
@@ -29,6 +33,8 @@
     </member>
     <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.Country">
       <summary>The country text supplied by the caller.</summary>
+      <value>Free-form text, not a numeric country identifier.</value>
+      <example>"Thailand"</example>
     </member>
     <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.MessageContent">
       <summary>The caller's enquiry or message text.</summary>
@@ -38,6 +44,10 @@
     </member>
     <member name="P:Legacy.Maliev.ContactService.Application.Models.ContactRequestResponse.ModifiedDate">
       <summary>The stored modification timestamp, omitted when the legacy record has none.</summary>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.PaginatedContactRequestResponse.Items">
+      <summary>The contact messages on the selected nonempty page.</summary>
+      <example>[{"id":42,"firstName":"Example","lastName":"Customer","company":"Example company","email":"customer@example.invalid","telephone":"0000000000","country":"Thailand","messageContent":"Please quote this part."}]</example>
     </member>
   </members>
 </doc>
