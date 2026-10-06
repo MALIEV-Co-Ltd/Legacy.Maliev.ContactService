@@ -81,6 +81,72 @@ public sealed class ContactDocumentationAcceptanceTests(ContactRuntimePostgresFi
         || path.Equals("/Messages/{messageId}", StringComparison.OrdinalIgnoreCase)
         || path.Contains("/contact-requests", StringComparison.OrdinalIgnoreCase);
 
+    [Fact]
+    public async Task Documentation_ExplainsQueriesAndActualEmptyPageResponse()
+    {
+        await using var parent = new ContactRuntimeFactory(postgres.ConnectionString);
+        await using var factory = parent.WithWebHostBuilder(builder => builder.UseEnvironment("Development"));
+        using var client = Client(factory);
+        using var body = JsonDocument.Parse(await client.GetStringAsync("/messages/openapi/v1.json"));
+        foreach (var path in body.RootElement.GetProperty("paths").EnumerateObject())
+        {
+            if (!IsContactPath(path.Name) || path.Name.Contains('{')) continue;
+            var operation = path.Value.GetProperty("get");
+            foreach (var name in new[] { "sort", "search", "index", "size" })
+            {
+                var parameter = Assert.Single(operation.GetProperty("parameters").EnumerateArray(), item => item.GetProperty("name").GetString() == name);
+                Assert.True(parameter.TryGetProperty("description", out var description) && !string.IsNullOrWhiteSpace(description.GetString()));
+            }
+            Assert.Equal("No messages exist on the selected page.", operation.GetProperty("responses").GetProperty("404").GetProperty("description").GetString());
+        }
+    }
+
+    [Fact]
+    public async Task Documentation_ExplainsCreatePayloadWithoutIdentityOrStorageSecrets()
+    {
+        await using var parent = new ContactRuntimeFactory(postgres.ConnectionString);
+        await using var factory = parent.WithWebHostBuilder(builder => builder.UseEnvironment("Development"));
+        using var client = Client(factory);
+        using var body = JsonDocument.Parse(await client.GetStringAsync("/messages/openapi/v1.json"));
+        var operation = body.RootElement.GetProperty("paths").GetProperty("/Messages").GetProperty("post");
+        Assert.True(operation.GetProperty("requestBody").TryGetProperty("description", out var description));
+        Assert.Contains("contact details", description.GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Documentation_DescribesExistingMutationResultsAndPayloadSchemas()
+    {
+        await using var parent = new ContactRuntimeFactory(postgres.ConnectionString);
+        await using var factory = parent.WithWebHostBuilder(builder => builder.UseEnvironment("Development"));
+        using var client = Client(factory);
+        using var body = JsonDocument.Parse(await client.GetStringAsync("/messages/openapi/v1.json"));
+        var paths = body.RootElement.GetProperty("paths");
+        var created = paths.GetProperty("/Messages").GetProperty("post").GetProperty("responses").GetProperty("201");
+        Assert.Equal("The created contact message, with its service-assigned identifier.", created.GetProperty("description").GetString());
+        Assert.True(created.TryGetProperty("content", out var content) && content.TryGetProperty("application/json", out _));
+        var item = paths.GetProperty("/Messages/{messageId}");
+        foreach (var method in new[] { "put", "delete" })
+        {
+            var responses = item.GetProperty(method).GetProperty("responses");
+            foreach (var status in new[] { "204", "404", "409" })
+                Assert.False(string.IsNullOrWhiteSpace(responses.GetProperty(status).GetProperty("description").GetString()));
+        }
+        var schemas = body.RootElement.GetProperty("components").GetProperty("schemas");
+        var request = schemas.GetProperty("UpsertContactRequestRequest");
+        Assert.Equal("Legacy-compatible ContactRequest create and update payload.", request.GetProperty("description").GetString());
+        foreach (var name in new[] { "firstName", "lastName", "company", "email", "telephone", "country", "messageContent" })
+        {
+            Assert.True(request.GetProperty("properties").TryGetProperty(name, out var field), $"Missing legacy field {name}: {request}");
+            Assert.True(field.TryGetProperty("description", out var description) && !string.IsNullOrWhiteSpace(description.GetString()),
+                $"Missing maintained description for {name}: {request}");
+        }
+        Assert.False(request.GetProperty("properties").TryGetProperty("id", out _));
+        var responseProperties = schemas.GetProperty("ContactRequestResponse").GetProperty("properties");
+        foreach (var name in new[] { "createdDate", "modifiedDate" })
+            Assert.True(responseProperties.TryGetProperty(name, out var field) && field.TryGetProperty("description", out var description)
+                && !string.IsNullOrWhiteSpace(description.GetString()), $"Missing maintained timestamp description for {name}: {responseProperties}");
+    }
+
     private static HttpClient Client(WebApplicationFactory<Program> factory) => factory.CreateClient(new()
     {
         BaseAddress = new Uri("https://localhost"),

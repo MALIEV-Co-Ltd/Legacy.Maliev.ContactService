@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <!-- Positional records keep their legacy constructor and JSON shape. These
+       property comments describe the public payload without replacing records. -->
+  <members>
+    <member name="T:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest">
+      <summary>Legacy-compatible ContactRequest create and update payload.</summary>
+      <example>{"firstName":"Example","lastName":"Customer","company":"Example company","email":"customer@example.invalid","telephone":"0000000000","country":"Thailand","messageContent":"Please quote this part."}</example>
+    </member>
+    <member name="T:Legacy.Maliev.ContactService.Application.Models.ContactRequestResponse">
+      <summary>Legacy-compatible ContactRequest response.</summary>
+    </member>
+    <member name="T:Legacy.Maliev.ContactService.Application.Models.PaginatedContactRequestResponse">
+      <summary>Legacy-compatible paginated Web API response shape.</summary>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.FirstName">
+      <summary>The caller's given name, when supplied.</summary>
+      <example>"Example"</example>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.LastName">
+      <summary>The caller's family name, when supplied.</summary>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.Company">
+      <summary>The caller's company, when supplied.</summary>
+      <value>Free-form caller-supplied text; this does not create or link a company record.</value>
+      <example>"Example company"</example>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.Email">
+      <summary>The email address supplied for replying to the message.</summary>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.Telephone">
+      <summary>The telephone number supplied for contacting the caller.</summary>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.Country">
+      <summary>The country text supplied by the caller.</summary>
+      <value>Free-form text, not a numeric country identifier.</value>
+      <example>"Thailand"</example>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest.MessageContent">
+      <summary>The caller's enquiry or message text.</summary>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.ContactRequestResponse.CreatedDate">
+      <summary>The stored creation timestamp, omitted when the legacy record has none.</summary>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.ContactRequestResponse.Id">
+      <value>The service-assigned identifier used to read, replace or delete this message.</value>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.ContactRequestResponse.FirstName">
+      <value>The stored caller's given name; omitted when null.</value>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.ContactRequestResponse.LastName">
+      <value>The stored caller's family name; omitted when null.</value>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.ContactRequestResponse.Company">
+      <value>The stored free-form company text, without a company-record link; omitted when null.</value>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.ContactRequestResponse.Email">
+      <value>The stored reply email text; omitted when null.</value>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.ContactRequestResponse.Telephone">
+      <value>The stored caller's telephone text; omitted when null.</value>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.ContactRequestResponse.Country">
+      <value>The stored free-form country text, not a numeric country identifier; omitted when null.</value>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.ContactRequestResponse.MessageContent">
+      <value>The stored enquiry text; omitted when null.</value>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.ContactRequestResponse.ModifiedDate">
+      <summary>The stored modification timestamp, omitted when the legacy record has none.</summary>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.PaginatedContactRequestResponse.Items">
+      <summary>The contact messages on the selected nonempty page.</summary>
+      <example>[{"id":42,"firstName":"Example","lastName":"Customer","company":"Example company","email":"customer@example.invalid","telephone":"0000000000","country":"Thailand","messageContent":"Please quote this part."}]</example>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.PaginatedContactRequestResponse.PageIndex">
+      <value>The selected one-based page index.</value>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.PaginatedContactRequestResponse.TotalPages">
+      <value>The number of pages for the filtered messages and requested page size.</value>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.PaginatedContactRequestResponse.TotalItems">
+      <value>The number of filtered messages, serialized as totalRecords for legacy callers.</value>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.PaginatedContactRequestResponse.HasPreviousPage">
+      <value>Whether the selected page has a preceding page.</value>
+    </member>
+    <member name="P:Legacy.Maliev.ContactService.Application.Models.PaginatedContactRequestResponse.HasNextPage">
+      <value>Whether the selected page has a following page.</value>
+    </member>
+    <member name="P:Microsoft.AspNetCore.Mvc.ValidationProblemDetails.Errors">
+      <value>Request-body binding and validation errors keyed by the affected field or JSON path.</value>
+    </member>
+  </members>
+</doc>

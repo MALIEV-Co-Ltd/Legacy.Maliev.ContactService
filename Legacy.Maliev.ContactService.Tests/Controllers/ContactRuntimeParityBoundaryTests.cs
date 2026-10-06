@@ -201,6 +201,56 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         Assert.Equal(HttpStatusCode.NotFound, beyond.StatusCode);
     }
 
+    [Theory]
+    [InlineData("/Messages", 0)]
+    [InlineData("/Messages", -1)]
+    [InlineData("/messages", 0)]
+    [InlineData("/messages", -1)]
+    public async Task LegacyUpdate_MissingNonpositiveIdentifierPreservesSourceNotFound(string route, int missingId)
+    {
+        await postgres.ResetAsync();
+        await using var factory = new ContactRuntimeFactory(postgres.ConnectionString);
+        using var client = factory.AuthenticatedClient();
+        var id = await CreateAsync(client, route, "source-must-remain");
+        await using var beforeDb = postgres.CreateContext();
+        var before = await beforeDb.Messages.AsNoTracking().SingleAsync();
+
+        using var response = await client.PutAsJsonAsync($"{route}/{missingId}", new { MessageContent = "must-not-persist" });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        await using var afterDb = postgres.CreateContext();
+        var after = await afterDb.Messages.AsNoTracking().SingleAsync();
+        Assert.Equal(id, after.Id);
+        Assert.Equal(before.MessageContent, after.MessageContent);
+        Assert.Equal(before.CreatedDate, after.CreatedDate);
+        Assert.Equal(before.ModifiedDate, after.ModifiedDate);
+    }
+
+    [Theory]
+    [InlineData("/Messages", 0, HttpStatusCode.NotFound)]
+    [InlineData("/Messages", -1, HttpStatusCode.NotFound)]
+    [InlineData("/messages/v1/contact-requests", 0, HttpStatusCode.BadRequest)]
+    [InlineData("/messages/v1/contact-requests", -1, HttpStatusCode.BadRequest)]
+    public async Task Update_NonpositiveIdentifierPreservesRouteStatusWithoutChangingStoredMessages(string route, int invalidId, HttpStatusCode expectedStatus)
+    {
+        await postgres.ResetAsync();
+        await using var factory = new ContactRuntimeFactory(postgres.ConnectionString);
+        using var client = factory.AuthenticatedClient();
+        var id = await CreateAsync(client, route, "original");
+        await using var beforeDb = postgres.CreateContext();
+        var before = await beforeDb.Messages.AsNoTracking().SingleAsync();
+
+        using var response = await client.PutAsJsonAsync($"{route}/{invalidId}", new { MessageContent = "must-not-persist" });
+
+        Assert.Equal(expectedStatus, response.StatusCode);
+        await using var afterDb = postgres.CreateContext();
+        var after = await afterDb.Messages.AsNoTracking().SingleAsync();
+        Assert.Equal(id, after.Id);
+        Assert.Equal(before.MessageContent, after.MessageContent);
+        Assert.Equal(before.CreatedDate, after.CreatedDate);
+        Assert.Equal(before.ModifiedDate, after.ModifiedDate);
+    }
+
     private static async Task<int> CreateAsync(HttpClient client, string route, string content)
     {
         using var response = await client.PostAsJsonAsync(route, new { MessageContent = content });
