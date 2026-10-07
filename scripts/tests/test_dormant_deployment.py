@@ -1,4 +1,4 @@
-import ctypes,hashlib,json,os,shutil,subprocess,tempfile,unittest,threading
+import ctypes,hashlib,json,os,shutil,subprocess,tempfile,unittest,threading,re
 from pathlib import Path
 from datetime import datetime,timedelta,timezone
 
@@ -75,6 +75,19 @@ class DormantDeploymentTests(unittest.TestCase):
     def reject(self,**arguments):
         code,out,_=run_renderer(**arguments)
         self.assertNotEqual(0,code);self.assertEqual(b'',out)
+    def test_published_provenance_contains_only_public_owner_refs(self):
+        obligations=json.loads((ROOT/'deploy/disabled/source-obligations.json').read_bytes())
+        self.assertNotIn('bindings',obligations)
+        self.assertNotIn('sourceSnapshot',obligations)
+        public_refs={'dbb132300f9c2851b7f3e1277137ed8dafbac4f8','c40a7f82cea347b949444dcd7fb730f2b8dc3c0e'}
+        def exposed_history(value):
+            return set(re.findall(r'(?<![a-f0-9])[a-f0-9]{40}(?![a-f0-9])',json.dumps(value))) - public_refs
+        self.assertEqual(set(),exposed_history(obligations))
+        rejected=dict(obligations,sourceCommit='f'*40)
+        self.assertEqual({'f'*40},exposed_history(rejected))
+        self.assertFalse(obligations['deploymentAllowed'])
+        self.assertFalse(obligations['wholeSourceClosure'])
+
     def test_actual_render_preserves_disabled_single_replica_policy(self):
         code,out,err=run_renderer();self.assertEqual(0,code);self.assertEqual(b'',err)
         obj=json.loads(out)
