@@ -1,0 +1,96 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "name": "legacy-maliev-contact",
+    "namespace": "maliev-legacy",
+    "labels": {
+      "app.kubernetes.io/name": "legacy-maliev-contact-service",
+      "app.kubernetes.io/part-of": "maliev-legacy"
+    },
+    "annotations": {
+      "legacy.maliev.com/deployment-enabled": "false",
+      "legacy.maliev.com/source-single-replica-target": "1"
+    }
+  },
+  "spec": {
+    "replicas": 0,
+    "selector": {
+      "matchLabels": {
+        "app.kubernetes.io/name": "legacy-maliev-contact-service"
+      }
+    },
+    "strategy": {
+      "type": "RollingUpdate",
+      "rollingUpdate": {
+        "maxSurge": 1,
+        "maxUnavailable": 0
+      }
+    },
+    "template": {
+      "metadata": {
+        "labels": {
+          "app.kubernetes.io/name": "legacy-maliev-contact-service",
+          "app.kubernetes.io/part-of": "maliev-legacy"
+        }
+      },
+      "spec": {
+        "serviceAccountName": "__REQUIRED_EXISTING_SERVICE_ACCOUNT__",
+        "automountServiceAccountToken": false,
+        "containers": [
+          {
+            "name": "legacy-maliev-contact-service",
+            "image": "__REQUIRED_IMMUTABLE_IMAGE__",
+            "ports": [
+              {
+                "name": "http",
+                "containerPort": 8080,
+                "protocol": "TCP"
+              }
+            ],
+            "envFrom": [
+              {
+                "secretRef": {
+                  "name": "__REQUIRED_EXISTING_RUNTIME_SECRET__",
+                  "optional": false
+                }
+              }
+            ],
+            "env": [
+              {
+                "name": "ASPNETCORE_ENVIRONMENT",
+                "value": "Production"
+              },
+              {
+                "name": "ASPNETCORE_HTTP_PORTS",
+                "value": "8080"
+              }
+            ],
+            "livenessProbe": {
+              "httpGet": {
+                "path": "/messages/liveness",
+                "port": "http"
+              }
+            },
+            "readinessProbe": {
+              "httpGet": {
+                "path": "/messages/readiness",
+                "port": "http"
+              }
+            },
+            "resources": {
+              "requests": {
+                "cpu": "15m",
+                "memory": "128Mi"
+              },
+              "limits": {
+                "cpu": "100m",
+                "memory": "192Mi"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

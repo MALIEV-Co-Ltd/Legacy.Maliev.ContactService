@@ -1,0 +1,178 @@
+{
+  "sourceSnapshot": "135e526d0dab85c415b3afdcefd7b70fe2c82e2f",
+  "bindings": [
+    {
+      "sourceCommit": "c660de68b633618cb0c857a287020f5ed9c42683",
+      "path": "Maliev.MessageService.Api/deployment.yaml",
+      "before": {
+        "commit": "c660de68b633618cb0c857a287020f5ed9c42683^",
+        "path": "Maliev.MessageService.Api/deployment.yaml",
+        "blob": "2bf7e9d21698e59c3bf726825ebce19f02a0f1cd",
+        "sha256": "ef4f2cbd1e4d4b6033e1f00c7e13d5d761464778a687336c6d180feb83e987c5",
+        "replicas": 2,
+        "strategy": {
+          "rollingUpdate": {
+            "maxSurge": 1,
+            "maxUnavailable": 1
+          },
+          "type": "RollingUpdate"
+        },
+        "resources": {
+          "requests": {
+            "cpu": "15m",
+            "memory": "128Mi"
+          },
+          "limits": {
+            "cpu": "100m",
+            "memory": "192Mi"
+          }
+        }
+      },
+      "after": {
+        "commit": "c660de68b633618cb0c857a287020f5ed9c42683",
+        "path": "Maliev.MessageService.Api/deployment.yaml",
+        "blob": "dff17af25164946479c343c8be5868ca9d5bbdde",
+        "sha256": "37cdf900686b71a98c28fb2c8c9eb79212b60fcff2c2d782999d131136ff53e6",
+        "replicas": 1,
+        "strategy": {
+          "rollingUpdate": {
+            "maxSurge": 1,
+            "maxUnavailable": 1
+          },
+          "type": "RollingUpdate"
+        },
+        "resources": {
+          "requests": {
+            "cpu": "15m",
+            "memory": "128Mi"
+          },
+          "limits": {
+            "cpu": "100m",
+            "memory": "192Mi"
+          }
+        }
+      },
+      "finalSnapshot": {
+        "commit": "135e526d0dab85c415b3afdcefd7b70fe2c82e2f",
+        "path": "Maliev.MessageService.Api/deployment.yaml",
+        "blob": "fb036007c396940779e61ff0dc6e357eda3209d7",
+        "sha256": "7a2ac99034bfaa1818d10b65ae32507095b275107dedafda9076a60578277ba2",
+        "replicas": 1,
+        "strategy": {
+          "rollingUpdate": {
+            "maxSurge": 1,
+            "maxUnavailable": 0
+          },
+          "type": "RollingUpdate"
+        },
+        "resources": {
+          "requests": {
+            "cpu": "15m",
+            "memory": "128Mi"
+          },
+          "limits": {
+            "cpu": "100m",
+            "memory": "192Mi"
+          }
+        }
+      },
+      "modernOwner": "Legacy.Maliev.ContactService",
+      "modernOwnerRef": "dbb132300f9c2851b7f3e1277137ed8dafbac4f8",
+      "adaptation": "Dormant replicas0 records source activation target1, maxSurge1/maxUnavailable0; source resource requests/limits preserved; committed messages health routes used."
+    },
+    {
+      "sourceCommit": "a7d0a4517ef1cfef638763cb1092088a5932fa2f",
+      "path": "Maliev.MessageService.Api/deployment.yaml",
+      "before": {
+        "commit": "a7d0a4517ef1cfef638763cb1092088a5932fa2f^",
+        "path": "Maliev.MessageService.Api/deployment.yaml",
+        "blob": "dff17af25164946479c343c8be5868ca9d5bbdde",
+        "sha256": "37cdf900686b71a98c28fb2c8c9eb79212b60fcff2c2d782999d131136ff53e6",
+        "replicas": 1,
+        "strategy": {
+          "rollingUpdate": {
+            "maxSurge": 1,
+            "maxUnavailable": 1
+          },
+          "type": "RollingUpdate"
+        },
+        "resources": {
+          "requests": {
+            "cpu": "15m",
+            "memory": "128Mi"
+          },
+          "limits": {
+            "cpu": "100m",
+            "memory": "192Mi"
+          }
+        }
+      },
+      "after": {
+        "commit": "a7d0a4517ef1cfef638763cb1092088a5932fa2f",
+        "path": "Maliev.MessageService.Api/deployment.yaml",
+        "blob": "51d42704fe6be13141596544dcc124edebbe7f64",
+        "sha256": "7131bdf126d96ca204e71a4102526b62e69f6250909b910c4438dafae8f89a5e",
+        "replicas": 1,
+        "strategy": {
+          "rollingUpdate": {
+            "maxSurge": 1,
+            "maxUnavailable": 0
+          },
+          "type": "RollingUpdate"
+        },
+        "resources": {
+          "requests": {
+            "cpu": "15m",
+            "memory": "128Mi"
+          },
+          "limits": {
+            "cpu": "100m",
+            "memory": "192Mi"
+          }
+        }
+      },
+      "finalSnapshot": {
+        "commit": "135e526d0dab85c415b3afdcefd7b70fe2c82e2f",
+        "path": "Maliev.MessageService.Api/deployment.yaml",
+        "blob": "fb036007c396940779e61ff0dc6e357eda3209d7",
+        "sha256": "7a2ac99034bfaa1818d10b65ae32507095b275107dedafda9076a60578277ba2",
+        "replicas": 1,
+        "strategy": {
+          "rollingUpdate": {
+            "maxSurge": 1,
+            "maxUnavailable": 0
+          },
+          "type": "RollingUpdate"
+        },
+        "resources": {
+          "requests": {
+            "cpu": "15m",
+            "memory": "128Mi"
+          },
+          "limits": {
+            "cpu": "100m",
+            "memory": "192Mi"
+          }
+        }
+      },
+      "modernOwner": "Legacy.Maliev.ContactService",
+      "modernOwnerRef": "dbb132300f9c2851b7f3e1277137ed8dafbac4f8",
+      "adaptation": "Dormant replicas0 records source activation target1, maxSurge1/maxUnavailable0; source resource requests/limits preserved; committed messages health routes used."
+    }
+  ],
+  "modernOwnerWitness": {
+    "ref": "dbb132300f9c2851b7f3e1277137ed8dafbac4f8",
+    "defaultsRef": "c40a7f82cea347b949444dcd7fb730f2b8dc3c0e",
+    "programPath": "Legacy.Maliev.ContactService.Api/Program.cs",
+    "endpointPrefix": "messages",
+    "publisherPath": ".github/workflows/publish-image.yml",
+    "imageSuffix": "legacy-maliev-contact-service",
+    "registryVariable": "LEGACY_ARTIFACT_REGISTRY",
+    "registryValueVerified": false
+  },
+  "deploymentAllowed": false,
+  "clusterAcceptance": false,
+  "wholeSourceClosure": false,
+  "identityReferences": "Mandatory caller-supplied existing refs only; neither existence nor authority is verified",
+  "excluded": "All other paths in the six/eight-path commits; Notification/Email, Prediction retirement, logging, runtime/native acceptance and activation"
+}
