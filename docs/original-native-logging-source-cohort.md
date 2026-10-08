@@ -1,5 +1,5 @@
 # Original native logging source cohort
 
-The application already uses built-in logging and the shared private startup boundary. This record maps the three original logging commits to the maintained entrypoint/project and existing real startup tests. It preserves each original SHA, parent, owning path and pending deployment/packaging obligation.
+The application already uses built-in logging and the shared private startup boundary. This public record maps three opaque source references to 16 owning paths and the maintained entrypoint/project and existing real startup tests. Exact original commit IDs, parent relationships and ledger/checkpoint pins remain in private migration evidence.
 
-The JSON record is a proposed source disposition. It does not copy private monorepo history or source code, change application behavior, accept a whole source commit, or claim a new runtime result. Exact-head hosted build/tests/privacy/coverage evidence and independent owner review are required before any acceptance. The alternate original self-contained packaging path needs an explicit packaging disposition; production deployment remains excluded.
+The JSON record is a proposed source disposition. It changes no application behavior, accepts no whole source reference, and claims no new runtime result. Exact-head hosted build/tests/privacy/coverage evidence and independent owner review are required before acceptance. Original alternate packaging needs an explicit disposition; production deployment remains excluded.
