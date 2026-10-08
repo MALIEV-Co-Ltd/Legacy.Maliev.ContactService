@@ -1,0 +1,318 @@
+{
+  "schemaVersion": 1,
+  "owner": "Legacy.Maliev.ContactService",
+  "canonicalLedgerBase": "82520210ce5a7fb4439e2553b6567b95eded5d35",
+  "currentCommittedApplicationBase": "4951254e7368b0bec5e80419b96832edd998e072",
+  "sourceCheckpoint": "135e526d0dab85c415b3afdcefd7b70fe2c82e2f",
+  "sourceCommits": [
+    {
+      "sourceSha": "9e51e6c5da29de8e617b65b59d46882cde6d3b64",
+      "parents": [
+        "600e79ac9b2836f540cf1547d3efd20362912aae"
+      ],
+      "owner": "Legacy.Maliev.ContactService",
+      "paths": [
+        {
+          "originalPath": "Maliev.MessageService.Api/Dockerfile",
+          "originalOwners": [
+            "Legacy.Maliev.ContactService"
+          ],
+          "originalLedgerDisposition": "migration-required",
+          "originalLedgerDecision": null,
+          "proposedSemanticDisposition": "packaging-successor-requires-owned-image-proof",
+          "targetPaths": [
+            "Legacy.Maliev.ContactService.Api/Dockerfile"
+          ],
+          "accepted": false,
+          "runtimeParityClaimed": false
+        },
+        {
+          "originalPath": "Maliev.MessageService.Api/Dockerfile.self-contained",
+          "originalOwners": [
+            "Legacy.Maliev.ContactService"
+          ],
+          "originalLedgerDisposition": "migration-required",
+          "originalLedgerDecision": null,
+          "proposedSemanticDisposition": "packaging-successor-requires-owned-image-proof",
+          "targetPaths": [
+            "Legacy.Maliev.ContactService.Api/Dockerfile"
+          ],
+          "accepted": false,
+          "runtimeParityClaimed": false
+        },
+        {
+          "originalPath": "Maliev.MessageService.Api/Maliev.MessageService.Api.csproj",
+          "originalOwners": [
+            "Legacy.Maliev.ContactService"
+          ],
+          "originalLedgerDisposition": "migration-required",
+          "originalLedgerDecision": null,
+          "proposedSemanticDisposition": "native-logging-project-successor",
+          "targetPaths": [
+            "Legacy.Maliev.ContactService.Api/Legacy.Maliev.ContactService.Api.csproj"
+          ],
+          "accepted": false,
+          "runtimeParityClaimed": false
+        },
+        {
+          "originalPath": "Maliev.MessageService.Api/Maliev.MessageService.Api.xml",
+          "originalOwners": [
+            "Legacy.Maliev.ContactService"
+          ],
+          "originalLedgerDisposition": "migration-required",
+          "originalLedgerDecision": null,
+          "proposedSemanticDisposition": "generated-docs-follow-maintained-owning-code",
+          "targetPaths": [
+            "Legacy.Maliev.ContactService.Api/Legacy.Maliev.ContactService.Api.csproj"
+          ],
+          "accepted": false,
+          "runtimeParityClaimed": false
+        },
+        {
+          "originalPath": "Maliev.MessageService.Api/Program.cs",
+          "originalOwners": [
+            "Legacy.Maliev.ContactService"
+          ],
+          "originalLedgerDisposition": "migration-required",
+          "originalLedgerDecision": null,
+          "proposedSemanticDisposition": "native-logging-and-private-failure-successor",
+          "targetPaths": [
+            "Legacy.Maliev.ContactService.Api/Program.cs"
+          ],
+          "accepted": false,
+          "runtimeParityClaimed": false
+        },
+        {
+          "originalPath": "Maliev.MessageService.Api/ServiceExtensions.cs",
+          "originalOwners": [
+            "Legacy.Maliev.ContactService"
+          ],
+          "originalLedgerDisposition": "migration-required",
+          "originalLedgerDecision": null,
+          "proposedSemanticDisposition": "native-logging-and-private-failure-successor",
+          "targetPaths": [
+            "Legacy.Maliev.ContactService.Api/Program.cs"
+          ],
+          "accepted": false,
+          "runtimeParityClaimed": false
+        },
+        {
+          "originalPath": "Maliev.MessageService.Api/Startup.cs",
+          "originalOwners": [
+            "Legacy.Maliev.ContactService"
+          ],
+          "originalLedgerDisposition": "migration-required",
+          "originalLedgerDecision": null,
+          "proposedSemanticDisposition": "native-logging-and-private-failure-successor",
+          "targetPaths": [
+            "Legacy.Maliev.ContactService.Api/Program.cs"
+          ],
+          "accepted": false,
+          "runtimeParityClaimed": false
+        }
+      ],
+      "wholeSourceShaAccepted": false,
+      "currentOwnerResolution": {
+        "status": "pending",
+        "issueUrls": [],
+        "prUrls": [],
+        "mergedTargetSha": null,
+        "validationEvidenceUrls": []
+      }
+    },
+    {
+      "sourceSha": "5ac7d045c51194edd9e64d8564f1b726b001be34",
+      "parents": [
+        "03dc9a1271c16e6535934445e9dd6e3f30e8fffe"
+      ],
+      "owner": "Legacy.Maliev.ContactService",
+      "paths": [
+        {
+          "originalPath": "Maliev.MessageService.Api/Dockerfile",
+          "originalOwners": [
+            "Legacy.Maliev.ContactService"
+          ],
+          "originalLedgerDisposition": "migration-required",
+          "originalLedgerDecision": null,
+          "proposedSemanticDisposition": "packaging-successor-requires-owned-image-proof",
+          "targetPaths": [
+            "Legacy.Maliev.ContactService.Api/Dockerfile"
+          ],
+          "accepted": false,
+          "runtimeParityClaimed": false
+        },
+        {
+          "originalPath": "Maliev.MessageService.Api/Dockerfile.self-contained",
+          "originalOwners": [
+            "Legacy.Maliev.ContactService"
+          ],
+          "originalLedgerDisposition": "migration-required",
+          "originalLedgerDecision": null,
+          "proposedSemanticDisposition": "packaging-successor-requires-owned-image-proof",
+          "targetPaths": [
+            "Legacy.Maliev.ContactService.Api/Dockerfile"
+          ],
+          "accepted": false,
+          "runtimeParityClaimed": false
+        },
+        {
+          "originalPath": "Maliev.MessageService.Api/Maliev.MessageService.Api.csproj",
+          "originalOwners": [
+            "Legacy.Maliev.ContactService"
+          ],
+          "originalLedgerDisposition": "migration-required",
+          "originalLedgerDecision": null,
+          "proposedSemanticDisposition": "native-logging-project-successor",
+          "targetPaths": [
+            "Legacy.Maliev.ContactService.Api/Legacy.Maliev.ContactService.Api.csproj"
+          ],
+          "accepted": false,
+          "runtimeParityClaimed": false
+        },
+        {
+          "originalPath": "Maliev.MessageService.Api/Program.cs",
+          "originalOwners": [
+            "Legacy.Maliev.ContactService"
+          ],
+          "originalLedgerDisposition": "migration-required",
+          "originalLedgerDecision": null,
+          "proposedSemanticDisposition": "native-logging-and-private-failure-successor",
+          "targetPaths": [
+            "Legacy.Maliev.ContactService.Api/Program.cs"
+          ],
+          "accepted": false,
+          "runtimeParityClaimed": false
+        },
+        {
+          "originalPath": "Maliev.MessageService.Api/Startup.cs",
+          "originalOwners": [
+            "Legacy.Maliev.ContactService"
+          ],
+          "originalLedgerDisposition": "migration-required",
+          "originalLedgerDecision": null,
+          "proposedSemanticDisposition": "native-logging-and-private-failure-successor",
+          "targetPaths": [
+            "Legacy.Maliev.ContactService.Api/Program.cs"
+          ],
+          "accepted": false,
+          "runtimeParityClaimed": false
+        }
+      ],
+      "wholeSourceShaAccepted": false,
+      "currentOwnerResolution": {
+        "status": "pending",
+        "issueUrls": [],
+        "prUrls": [],
+        "mergedTargetSha": null,
+        "validationEvidenceUrls": []
+      }
+    },
+    {
+      "sourceSha": "a59193ae2ac030d0e1d373ce4ec50c1b35437391",
+      "parents": [
+        "8175e8f3383d31030de2321c480bf6f5bc0fbb2b"
+      ],
+      "owner": "Legacy.Maliev.ContactService",
+      "paths": [
+        {
+          "originalPath": "Maliev.MessageService.Api/Maliev.MessageService.Api.csproj",
+          "originalOwners": [
+            "Legacy.Maliev.ContactService"
+          ],
+          "originalLedgerDisposition": "migration-required",
+          "originalLedgerDecision": null,
+          "proposedSemanticDisposition": "native-logging-project-successor",
+          "targetPaths": [
+            "Legacy.Maliev.ContactService.Api/Legacy.Maliev.ContactService.Api.csproj"
+          ],
+          "accepted": false,
+          "runtimeParityClaimed": false
+        },
+        {
+          "originalPath": "Maliev.MessageService.Api/Program.cs",
+          "originalOwners": [
+            "Legacy.Maliev.ContactService"
+          ],
+          "originalLedgerDisposition": "migration-required",
+          "originalLedgerDecision": null,
+          "proposedSemanticDisposition": "native-logging-and-private-failure-successor",
+          "targetPaths": [
+            "Legacy.Maliev.ContactService.Api/Program.cs"
+          ],
+          "accepted": false,
+          "runtimeParityClaimed": false
+        },
+        {
+          "originalPath": "Maliev.MessageService.Api/Startup.cs",
+          "originalOwners": [
+            "Legacy.Maliev.ContactService"
+          ],
+          "originalLedgerDisposition": "migration-required",
+          "originalLedgerDecision": null,
+          "proposedSemanticDisposition": "native-logging-and-private-failure-successor",
+          "targetPaths": [
+            "Legacy.Maliev.ContactService.Api/Program.cs"
+          ],
+          "accepted": false,
+          "runtimeParityClaimed": false
+        },
+        {
+          "originalPath": "Maliev.MessageService.Api/deploy.ps1",
+          "originalOwners": [
+            "Legacy.Maliev.ContactService"
+          ],
+          "originalLedgerDisposition": "migration-required",
+          "originalLedgerDecision": null,
+          "proposedSemanticDisposition": "excluded-deployment-remains-pending",
+          "targetPaths": [],
+          "accepted": false,
+          "runtimeParityClaimed": false
+        }
+      ],
+      "wholeSourceShaAccepted": false,
+      "currentOwnerResolution": {
+        "status": "pending",
+        "issueUrls": [],
+        "prUrls": [],
+        "mergedTargetSha": null,
+        "validationEvidenceUrls": []
+      }
+    }
+  ],
+  "ownedPathCount": 16,
+  "deploymentPathsExcluded": 1,
+  "targetSourceEvidence": [
+    {
+      "path": "Legacy.Maliev.ContactService.Api/Program.cs",
+      "gitBlobOid": "ed0104ceb851dcb7637cfb6fe645b95da9252a9f",
+      "sha256": "08aecec2ce6f7ece3d1140db9eedefd88561b01d2f5fcddaff225d68ee996ef3"
+    },
+    {
+      "path": "Legacy.Maliev.ContactService.Api/Legacy.Maliev.ContactService.Api.csproj",
+      "gitBlobOid": "dbe5bc05f8e6b50e3c326a82c3fea1730055681b",
+      "sha256": "b8b306311a8994ea832f97c1b2accfa1dfe743511e6d3397f5b60c9194132687"
+    }
+  ],
+  "realStartupTestSources": [
+    {
+      "path": "Legacy.Maliev.ContactService.Tests/Startup/StartupFailureAcceptanceTests.cs",
+      "sha256": "6dedd8bbccfd3a7cc79a9a4e7a573d73ac6889eb326384f35065f5ee4c35d34f",
+      "bytes": 14068
+    }
+  ],
+  "runtimeImplementationAlreadyPresent": true,
+  "newApplicationImplementationEdits": 0,
+  "newRuntimeEvidence": null,
+  "sourceClosure": false,
+  "acceptanceRequires": [
+    "Exact PR-head hosted strict Release build with zero warnings/errors.",
+    "Existing real production entrypoint/privacy tests and full owning suite, format, package audit and raw coverage.",
+    "Independent source disposition review per SHA/path; packaging/image and deployment obligations remain pending until actual proof.",
+    "Attach exact owning issue/PR/merged target/run evidence without changing canonical tracking here."
+  ],
+  "canonicalCounts": [
+    1126,
+    204,
+    922
+  ]
+}
