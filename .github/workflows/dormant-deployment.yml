@@ -1,0 +1,22 @@
+name: Dormant deployment controls
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  dormant-controls:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out ContactService
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Run actual offline renderer controls
+        shell: pwsh
+        run: python scripts/tests/test_dormant_deployment.py

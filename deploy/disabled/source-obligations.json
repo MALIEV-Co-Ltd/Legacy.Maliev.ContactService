@@ -1,0 +1,42 @@
+{
+  "originService": "MessageService",
+  "policyTransitions": [
+    {
+      "policy": "single-replica-target",
+      "before": 2,
+      "target": 1
+    },
+    {
+      "policy": "rolling-update-availability",
+      "beforeMaxUnavailable": 1,
+      "targetMaxUnavailable": 0,
+      "maxSurge": 1
+    }
+  ],
+  "projectedResources": {
+    "requests": {
+      "cpu": "15m",
+      "memory": "128Mi"
+    },
+    "limits": {
+      "cpu": "100m",
+      "memory": "192Mi"
+    }
+  },
+  "modernOwnerWitness": {
+    "ref": "dbb132300f9c2851b7f3e1277137ed8dafbac4f8",
+    "defaultsRef": "c40a7f82cea347b949444dcd7fb730f2b8dc3c0e",
+    "programPath": "Legacy.Maliev.ContactService.Api/Program.cs",
+    "endpointPrefix": "messages",
+    "publisherPath": ".github/workflows/publish-image.yml",
+    "imageSuffix": "legacy-maliev-contact-service",
+    "registryVariable": "LEGACY_ARTIFACT_REGISTRY",
+    "registryValueVerified": false
+  },
+  "privateProvenance": "Exact original parent/commit/final-snapshot bytes and identifiers remain in migration-owner private evidence, outside this public repository.",
+  "deploymentAllowed": false,
+  "clusterAcceptance": false,
+  "wholeSourceClosure": false,
+  "identityReferences": "Mandatory caller-supplied existing refs only; neither existence nor authority is verified",
+  "excluded": "Other source owners, Notification/Email, Prediction retirement, logging, runtime/native acceptance and activation"
+}
