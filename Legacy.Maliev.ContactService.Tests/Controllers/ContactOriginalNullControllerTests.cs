@@ -1,6 +1,7 @@
 using Legacy.Maliev.ContactService.Api.Controllers;
 using Legacy.Maliev.ContactService.Application.Interfaces;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Routing;
 using Moq;
 
 namespace Legacy.Maliev.ContactService.Tests.Controllers;
@@ -38,6 +39,7 @@ public sealed class ContactOriginalNullControllerTests
     {
         var service = new Mock<IContactService>(MockBehavior.Strict);
         var controller = new ContactRequestsController(service.Object);
+        controller.ControllerContext = new ControllerContext { RouteData = new RouteData() };
         controller.ControllerContext.RouteData.Values["version"] = "1.0";
 
         var result = await controller.UpdateContactRequestAsync(0, null!, CancellationToken.None);
