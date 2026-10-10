@@ -294,7 +294,7 @@ public sealed class ContactDiagnosticConsoleFormatterTests
             && name.GetString() == "UnhandledRequestFailure");
         Assert.Equal("CRITICAL", failure.GetProperty("severity").GetString());
         Assert.Equal(traceIdentifier, failure.GetProperty("IncidentId").GetString());
-        Assert.Equal(nameof(InvalidOperationException), failure.GetProperty("ExceptionType").GetString());
+        Assert.Equal(nameof(Exception), failure.GetProperty("ExceptionType").GetString());
         Assert.False(failure.TryGetProperty("Path", out _));
     }
 
@@ -367,11 +367,11 @@ public sealed class ContactDiagnosticConsoleFormatterTests
     private sealed class ConsoleFailureService(string sensitive) : Legacy.Maliev.ContactService.Application.Interfaces.IContactService
     {
         public Task<Legacy.Maliev.ContactService.Application.Models.PaginatedContactRequestResponse> GetPaginatedAsync(
-            Legacy.Maliev.ContactService.Application.Models.ContactRequestSortType? sort, string? search, int? index, int? size, CancellationToken cancellationToken) => throw new InvalidOperationException(sensitive);
-        public Task<Legacy.Maliev.ContactService.Application.Models.ContactRequestResponse?> GetByIdAsync(int id, CancellationToken cancellationToken) => throw new InvalidOperationException(sensitive);
-        public Task<Legacy.Maliev.ContactService.Application.Models.ContactRequestResponse> CreateAsync(Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest request, CancellationToken cancellationToken) => throw new InvalidOperationException(sensitive);
-        public Task<bool> UpdateAsync(int id, Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest request, CancellationToken cancellationToken) => throw new InvalidOperationException(sensitive);
-        public Task<bool> DeleteAsync(int id, CancellationToken cancellationToken) => throw new InvalidOperationException(sensitive);
+            Legacy.Maliev.ContactService.Application.Models.ContactRequestSortType? sort, string? search, int? index, int? size, CancellationToken cancellationToken) => throw new Exception(sensitive);
+        public Task<Legacy.Maliev.ContactService.Application.Models.ContactRequestResponse?> GetByIdAsync(int id, CancellationToken cancellationToken) => throw new Exception(sensitive);
+        public Task<Legacy.Maliev.ContactService.Application.Models.ContactRequestResponse> CreateAsync(Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest request, CancellationToken cancellationToken) => throw new Exception(sensitive);
+        public Task<bool> UpdateAsync(int id, Legacy.Maliev.ContactService.Application.Models.UpsertContactRequestRequest request, CancellationToken cancellationToken) => throw new Exception(sensitive);
+        public Task<bool> DeleteAsync(int id, CancellationToken cancellationToken) => throw new Exception(sensitive);
     }
 
     private sealed class HostRetainedProvider : ILoggerProvider
