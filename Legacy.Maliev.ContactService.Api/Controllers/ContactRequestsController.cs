@@ -78,6 +78,11 @@ public sealed class ContactRequestsController(IContactService contactService) : 
         [FromBody] UpsertContactRequestRequest request,
         CancellationToken cancellationToken)
     {
+        if (request is null)
+        {
+            return BadRequest("Message is required");
+        }
+
         var created = await contactService.CreateAsync(request, cancellationToken);
         return CreatedAtRoute("GetMessage", new { messageId = created.Id }, created);
     }
@@ -106,6 +111,11 @@ public sealed class ContactRequestsController(IContactService contactService) : 
         if (messageId <= 0 && ControllerContext.RouteData.Values.ContainsKey("version"))
         {
             return BadRequest();
+        }
+
+        if (request is null)
+        {
+            return BadRequest("Message is required");
         }
 
         try
