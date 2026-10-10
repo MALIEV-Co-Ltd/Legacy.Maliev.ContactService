@@ -49,3 +49,7 @@ Original business paths retain historical SHA `5fac706a7983a6d359b39acbd670e6800
 - `Maliev.MessageService.Tests/Messages/UpdateMessageAsync_UnitTest.cs`
 
 Shared original pagination helper: `Maliev.Entities/ViewModels/PaginatedListWebApi.cs`; arithmetic correctness is separately scoped.
+
+## Reviewed producer repair
+
+Actual tests-only baseline `e5a2e4aea3ba5e9a309a2155d523a61f7af4a8cf` and its independently reviewed raw hosted proof precede this repair. Direct CLR null inputs now return the original exact 400 string before service use, retaining the versioned identifier guard first. Pagination computes its offset as Int64, returns the existing exhausted-page metadata before querying, and casts only after the filtered Int32 count proves the offset fits. Every new and original test remains unchanged. Exact repair-head hosted validation is pending. Source SQL-host, genuine deployed IAM/consumer acceptance and whole source closure remain unqualified.

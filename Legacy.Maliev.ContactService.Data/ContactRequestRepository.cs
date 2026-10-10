@@ -34,6 +34,18 @@ public sealed class ContactRequestRepository(ContactRequestDbContext dbContext) 
         var pageIndex = Math.Max(index ?? 1, 1);
         var pageSize = Math.Max(size ?? totalItems, 1);
         var totalPages = totalItems == 0 ? 0 : (int)Math.Ceiling(totalItems / (double)pageSize);
+        var offset = (pageIndex - 1L) * pageSize;
+        if (offset >= totalItems)
+        {
+            return new PaginatedContactRequestResponse(
+                [],
+                pageIndex,
+                totalPages,
+                totalItems,
+                pageIndex > 1,
+                pageIndex < totalPages);
+        }
+
         query = sort switch
         {
             ContactRequestSortType.MessageId_Descending => query.OrderByDescending(contactRequest => contactRequest.Id),
@@ -42,7 +54,7 @@ public sealed class ContactRequestRepository(ContactRequestDbContext dbContext) 
             _ => query.OrderBy(contactRequest => contactRequest.Id),
         };
         var items = await query
-            .Skip((pageIndex - 1) * pageSize)
+            .Skip((int)offset)
             .Take(pageSize)
             .Select(contactRequest => new ContactRequestResponse(
                 contactRequest.Id,
