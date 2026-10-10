@@ -322,7 +322,10 @@ public sealed class ContactDiagnosticConsoleFormatterTests
             {
                 ["ConnectionStrings:ContactRequestDbContext"] = new Npgsql.NpgsqlConnectionStringBuilder
                 {
-                    Host = System.Net.IPAddress.Loopback.ToString(), Port = 1, Database = "console_probe", Pooling = false,
+                    Host = System.Net.IPAddress.Loopback.ToString(),
+                    Port = 1,
+                    Database = "console_probe",
+                    Pooling = false,
                 }.ConnectionString,
                 ["Jwt:PublicKey"] = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(rsa.ExportSubjectPublicKeyInfoPem())),
                 ["Jwt:Issuer"] = "https://console-probe.example.invalid",
