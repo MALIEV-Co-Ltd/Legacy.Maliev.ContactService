@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Legacy.Maliev.ContactService.Api.Logging;
 using Legacy.Maliev.ContactService.Application.Interfaces;
 using Legacy.Maliev.ContactService.Application.Services;
 using Legacy.Maliev.ContactService.Data;
@@ -24,6 +25,7 @@ static async Task RunHostAsync(string[] startupArgs)
     var builder = WebApplication.CreateBuilder(startupArgs);
 
     builder.AddServiceDefaults();
+    builder.Logging.AddContactPrivateDiagnostics();
     builder.AddDefaultApiVersioning();
     builder.AddPostgresDbContext<ContactRequestDbContext>(connectionName: "ContactRequestDbContext");
     builder.AddStandardCache("legacy:contact:");
