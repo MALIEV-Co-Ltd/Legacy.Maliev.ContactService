@@ -12,14 +12,15 @@ import time
 import uuid
 
 SOLUTION = 'Legacy.Maliev.ContactService.slnx'
-FOCUS = 'FullyQualifiedName~ContactSourcePaginationCardinalityHttpTests|FullyQualifiedName~ContactFixtureLifecycleTests'
+FOCUS = 'FullyQualifiedName~ContactSourcePaginationCardinalityHttpTests|FullyQualifiedName~ContactFixtureLifecycleTests|FullyQualifiedName~WorkflowContractTests'
 SOURCE_PATHS = ('.github/workflows/_build-and-test.yml',
                 'Legacy.Maliev.ContactService.Tests/Controllers/ContactRuntimeParityBoundaryTests.cs',
                 'Legacy.Maliev.ContactService.Tests/Controllers/ContactFixtureLifecycle.cs',
                 'Legacy.Maliev.ContactService.Tests/Controllers/ContactFixtureLifecycleTests.cs',
                 'Legacy.Maliev.ContactService.Tests/Controllers/ContactSourcePaginationCardinalityHttpTests.cs',
                 'tooling/contact-hosted-custody.py', 'tooling/contact-hosted-dotnet.sh',
-                'tooling/test-contact-hosted-custody.py')
+                'tooling/test-contact-hosted-custody.py',
+                'Legacy.Maliev.ContactService.Tests/Workflows/WorkflowContractTests.cs')
 
 
 def git(arguments):
