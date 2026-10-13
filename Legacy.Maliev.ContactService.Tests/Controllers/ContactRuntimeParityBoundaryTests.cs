@@ -832,25 +832,118 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
 
 public sealed class ContactRuntimePostgresFixture : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer container = new PostgreSqlBuilder("postgres:18-alpine").Build();
+    private readonly string lease = Guid.NewGuid().ToString("N");
+    private readonly PostgreSqlContainer container;
+    private readonly ContactFixtureLifecycle lifecycle;
+    private readonly ContactFixtureReceiptIdentity receiptIdentity = new();
+
+    public ContactRuntimePostgresFixture()
+    {
+        container = new PostgreSqlBuilder("postgres:18-alpine")
+            .WithLabel("codex.contact.run", Environment.GetEnvironmentVariable("CONTACT_HOSTED_RUN_LEASE") ?? lease)
+            .WithLabel("codex.contact.fixture", lease)
+            .WithCreateParameterModifier(parameters =>
+            {
+                parameters.HostConfig.Memory = 536870912;
+                parameters.HostConfig.NanoCPUs = 1000000000;
+                parameters.HostConfig.Tmpfs = new Dictionary<string, string>
+                {
+                    ["/var/lib/postgresql"] = "rw,size=134217728",
+                };
+            }).Build();
+        lifecycle = new ContactFixtureLifecycle(
+            async token =>
+            {
+                ObserveAdmission("container-start");
+                await container.StartAsync(token);
+                receiptIdentity.Capture(container.Id);
+                Observe("container-start-settled", null);
+            },
+            async token =>
+            {
+                ObserveAdmission("migration");
+                await using var db = CreateContext();
+                await db.Database.MigrateAsync(token);
+                Observe("migration-settled", null);
+            },
+            async () =>
+            {
+                await container.DisposeAsync();
+                Observe("container-dispose-settled", null);
+            }, Observe);
+    }
+
     public string ConnectionString => container.GetConnectionString();
     public ContactRequestDbContext CreateContext() => new(new DbContextOptionsBuilder<ContactRequestDbContext>()
         .UseNpgsql(ConnectionString).Options);
 
     public async Task InitializeAsync()
     {
-        await container.StartAsync();
-        await using var db = CreateContext();
-        await db.Database.MigrateAsync();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+        await lifecycle.InitializeAsync(deadline.Token);
     }
 
     public async Task ResetAsync()
     {
+        ObserveAdmission("reset");
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using var db = CreateContext();
-        await db.Messages.ExecuteDeleteAsync();
+        await db.Messages.ExecuteDeleteAsync(deadline.Token);
     }
 
-    public Task DisposeAsync() => container.DisposeAsync().AsTask();
+    public Task DisposeAsync() => lifecycle.DisposeAsync();
+
+    private void ObserveAdmission(string phase)
+    {
+        var memory = File.ReadLines("/proc/meminfo").Single(line => line.StartsWith("MemAvailable:", StringComparison.Ordinal));
+        var availableKiB = long.Parse(memory.Split(' ', StringSplitOptions.RemoveEmptyEntries)[1], System.Globalization.CultureInfo.InvariantCulture);
+        ObserveRecord(phase + "-admission", null, availableKiB);
+        if (availableKiB < 4194304)
+        {
+            throw new InvalidOperationException("Contact container phase memory admission failed; setup failure, not behavioral RED.");
+        }
+    }
+
+    private void Observe(string phase, Exception? failure) => ObserveRecord(phase, failure, null);
+
+    private void ObserveRecord(string phase, Exception? failure, long? availableKiB)
+    {
+        var directory = Environment.GetEnvironmentVariable("CONTACT_FIXTURE_CUSTODY_DIRECTORY");
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return;
+        }
+        Directory.CreateDirectory(directory);
+        File.AppendAllText(Path.Combine(directory, lease + ".jsonl"), JsonSerializer.Serialize(new
+        {
+            lease,
+            runLease = Environment.GetEnvironmentVariable("CONTACT_HOSTED_RUN_LEASE"),
+            observedUtc = DateTime.UtcNow,
+            phase,
+            availableKiB,
+            testedCommit = Environment.GetEnvironmentVariable("GITHUB_SHA"),
+            containerId = phase == "container-start-settled" || phase == "container-dispose-settled" ? receiptIdentity.ContainerId : null,
+            exceptionType = failure?.GetType().FullName,
+        }) + Environment.NewLine);
+    }
+}
+
+/// <summary>Retains the actual started resource identity without querying it after disposal.</summary>
+internal sealed class ContactFixtureReceiptIdentity
+{
+    private string? containerId;
+
+    public string? ContainerId => Volatile.Read(ref containerId);
+
+    public void Capture(string actualContainerId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(actualContainerId);
+        var previous = Interlocked.CompareExchange(ref containerId, actualContainerId, null);
+        if (previous is not null && !string.Equals(previous, actualContainerId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Contact fixture receipt identity changed; preserve uncertainty.");
+        }
+    }
 }
 
 internal sealed class ContactRuntimeFactory(
