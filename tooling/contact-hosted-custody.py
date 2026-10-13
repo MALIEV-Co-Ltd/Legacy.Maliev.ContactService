@@ -103,7 +103,25 @@ def live_original_leader(anchor):
     return True
 
 
+def validate_generation_metadata(row):
+    bounds = {'pid': (1, 2147483647), 'session': (1, 2147483647),
+              'startTicks': (0, 9223372036854775807), 'uid': (0, 4294967295)}
+    if not isinstance(row, dict):
+        raise RuntimeError('Process generation metadata unavailable; preserve uncertainty')
+    for key, (lower, upper) in bounds.items():
+        value = row.get(key)
+        if type(value) is not int or not lower <= value <= upper:
+            raise RuntimeError('Process generation metadata invalid; preserve uncertainty')
+
+
 def members(anchor, lease, retained):
+    # This fixed original allocation birth uses /proc/<pid>/stat starttime in
+    # the controller/child's same live Linux boot and PID namespace.
+    validate_generation_metadata(anchor)
+    original = next((old for old in retained if same_generation(anchor, old)), None)
+    validate_generation_metadata(original)
+    if anchor['session'] != anchor['pid']:
+        raise RuntimeError('Original SDK allocation anchor unavailable; preserve uncertainty')
     rows = []
     for path in Path('/proc').iterdir():
         if not path.name.isdigit():
@@ -112,11 +130,21 @@ def members(anchor, lease, retained):
         row = process_metadata(pid)
         if row is None:
             continue
+        validate_generation_metadata(row)
         known = next((old for old in retained if same_generation(row, old)), None)
         if known is not None:
             actual = selected_identity(row)
             if actual is not None:
                 rows.append(actual)
+            continue
+        # Retained generations are handled first. Unknown older generations
+        # cannot descend from this phase, even when a numeric SID was recycled.
+        # Recheck cheap metadata before exclusion; a reuse race stays uncertain.
+        if row['startTicks'] < anchor['startTicks']:
+            rechecked = process_metadata(pid)
+            validate_generation_metadata(rechecked)
+            if not same_generation(rechecked, row):
+                raise RuntimeError('Older candidate generation changed; preserve uncertainty')
             continue
         # Sanitized nested proof children can lack the nonce. Admit them only
         # while the original leader generation is live before and after selection.

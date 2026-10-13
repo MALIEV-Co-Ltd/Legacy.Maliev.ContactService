@@ -3,6 +3,7 @@ import datetime as dt
 import errno
 import importlib.util
 import json
+from contextlib import ExitStack
 from pathlib import Path
 import unittest
 from unittest.mock import MagicMock, patch
@@ -13,6 +14,167 @@ spec.loader.exec_module(custody)
 
 
 class CustodyControls(unittest.TestCase):
+    def old_candidate_controls(self, session, recheck=..., failure=None):
+        anchor = {'pid': 17, 'session': 17, 'startTicks': 30, 'uid': 1001, 'executable': '/sdk/dotnet'}
+        candidate = {'pid': 18, 'session': session, 'startTicks': 29, 'uid': 1001}
+        observed = dict(candidate) if recheck is ... else recheck
+        effects = [candidate, failure if failure is not None else observed]
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(Path, 'iterdir', return_value=[Path('/proc/18')]))
+            metadata = stack.enter_context(patch.object(custody, 'process_metadata', side_effect=effects))
+            forbidden = [stack.enter_context(patch.object(custody, name, side_effect=AssertionError('Foreign getter forbidden')))
+                         for name in ('identity', 'selected_identity', 'live_original_leader', 'signal_exact')]
+            forbidden.append(stack.enter_context(patch.object(Path, 'read_bytes', side_effect=AssertionError('Foreign environ forbidden'))))
+            forbidden.append(stack.enter_context(patch.object(custody.os, 'kill', side_effect=AssertionError('Foreign signal forbidden'))))
+            if failure is not None:
+                with self.assertRaises(type(failure)) as result:
+                    custody.members(anchor, 'owned-lease', [anchor])
+                self.assertIs(failure, result.exception)
+            elif recheck is not ...:
+                with self.assertRaises(RuntimeError):
+                    custody.members(anchor, 'owned-lease', [anchor])
+            else:
+                self.assertEqual([], custody.members(anchor, 'owned-lease', [anchor]))
+            self.assertEqual([18, 18], [call.args[0] for call in metadata.call_args_list])
+            for probe in forbidden:
+                probe.assert_not_called()
+
+    def test_prephase_different_session_has_zero_foreign_getters(self):
+        self.old_candidate_controls(18)
+
+    def test_prephase_same_numeric_session_is_excluded_before_leader_probe(self):
+        self.old_candidate_controls(17)
+
+    def test_prephase_candidate_reuse_and_missing_recheck_stay_fail_closed(self):
+        for recheck in (None, {'pid': 18, 'session': 18, 'startTicks': 31, 'uid': 1001},
+                        {'pid': 18, 'session': 19, 'startTicks': 29, 'uid': 1001},
+                        {'pid': 18, 'session': 18, 'startTicks': 29, 'uid': 0}):
+            with self.subTest(recheck=recheck):
+                self.old_candidate_controls(18, recheck=recheck)
+
+    def test_prephase_unreadable_recheck_keeps_original_failure(self):
+        self.old_candidate_controls(18, failure=PermissionError(errno.EACCES, 'synthetic', '/proc/18/stat'))
+
+    def test_equal_and_newer_births_keep_nonce_permission_failure(self):
+        anchor = {'pid': 17, 'session': 17, 'startTicks': 30, 'uid': 1001, 'executable': '/sdk/dotnet'}
+        for birth in (30, 31):
+            candidate = {'pid': 18, 'session': 18, 'startTicks': birth, 'uid': 1001}
+            primary = PermissionError(errno.EACCES, 'synthetic', '/proc/18/environ')
+            with self.subTest(birth=birth), patch.object(Path, 'iterdir', return_value=[Path('/proc/18')]), \
+                    patch.object(custody, 'process_metadata', return_value=candidate), \
+                    patch.object(custody.os, 'getuid', return_value=1001, create=True), \
+                    patch.object(Path, 'read_bytes', side_effect=primary), \
+                    patch.object(custody, 'identity') as identity, patch.object(custody.os, 'kill') as kill:
+                with self.assertRaises(PermissionError) as result:
+                    custody.members(anchor, 'owned-lease', [anchor])
+                self.assertIs(primary, result.exception)
+            identity.assert_not_called()
+            kill.assert_not_called()
+
+    def test_retained_older_generation_is_verified_before_exclusion(self):
+        anchor = {'pid': 17, 'session': 17, 'startTicks': 30, 'uid': 1001, 'executable': '/sdk/dotnet'}
+        retained = {'pid': 18, 'session': 18, 'startTicks': 29, 'uid': 1001, 'executable': '/sdk/retained'}
+        primary = PermissionError(errno.EACCES, 'synthetic', '/proc/18/exe')
+        with patch.object(Path, 'iterdir', return_value=[Path('/proc/18')]), \
+                patch.object(custody, 'process_metadata', return_value=retained) as metadata, \
+                patch.object(custody, 'identity', side_effect=primary), patch.object(Path, 'read_bytes') as environ:
+            with self.assertRaises(PermissionError) as result:
+                custody.members(anchor, 'owned-lease', [anchor, retained])
+            self.assertIs(primary, result.exception)
+        metadata.assert_called_once_with(18)
+        environ.assert_not_called()
+
+    def test_equal_and_newer_foreign_readable_environment_without_nonce_is_preserved(self):
+        anchor = {'pid': 17, 'session': 17, 'startTicks': 30, 'uid': 1001, 'executable': '/sdk/dotnet'}
+        for birth in (30, 31):
+            candidate = {'pid': 18, 'session': 18, 'startTicks': birth, 'uid': 1001}
+            with self.subTest(birth=birth), ExitStack() as stack:
+                stack.enter_context(patch.object(Path, 'iterdir', return_value=[Path('/proc/18')]))
+                metadata = stack.enter_context(patch.object(custody, 'process_metadata', return_value=candidate))
+                stack.enter_context(patch.object(custody.os, 'getuid', return_value=1001, create=True))
+                environment = stack.enter_context(patch.object(Path, 'read_bytes', autospec=True,
+                    return_value=b'UNRELATED=synthetic\0'))
+                forbidden = [stack.enter_context(patch.object(custody, name,
+                    side_effect=AssertionError('Foreign getter forbidden')))
+                    for name in ('selected_identity', 'identity', 'live_original_leader', 'signal_exact')]
+                forbidden.append(stack.enter_context(patch.object(custody.os, 'kill',
+                    side_effect=AssertionError('Foreign signal forbidden'))))
+                self.assertEqual([], custody.members(anchor, 'owned-lease', [anchor]))
+                environment.assert_called_once_with(Path('/proc/18/environ'))
+                metadata.assert_called_once_with(18)
+                for probe in forbidden:
+                    probe.assert_not_called()
+
+    def test_invalid_anchor_and_missing_original_provenance_are_not_exclusion_proof(self):
+        original = {'pid': 17, 'session': 17, 'startTicks': 30, 'uid': 1001, 'executable': '/sdk/dotnet'}
+        for value in (True, -1, 9223372036854775808, '30', None):
+            with self.subTest(value=value), patch.object(Path, 'iterdir') as listing:
+                with self.assertRaises(RuntimeError):
+                    custody.members(dict(original, startTicks=value), 'owned-lease', [original])
+            listing.assert_not_called()
+        for anchor, retained in ((original, []), (dict(original, startTicks=31), [original]),
+                                 (dict(original, session=18), [dict(original, session=18)])):
+            with self.subTest(anchor=anchor, retained=retained), patch.object(Path, 'iterdir') as listing:
+                with self.assertRaises(RuntimeError):
+                    custody.members(anchor, 'owned-lease', retained)
+            listing.assert_not_called()
+
+    def test_invalid_candidate_numeric_fields_fail_before_foreign_getters(self):
+        anchor = {'pid': 17, 'session': 17, 'startTicks': 30, 'uid': 1001, 'executable': '/sdk/dotnet'}
+        valid = {'pid': 18, 'session': 18, 'startTicks': 29, 'uid': 1001}
+        for key, value in (('pid', True), ('session', 0), ('startTicks', True), ('startTicks', -1),
+                           ('startTicks', 9223372036854775808), ('startTicks', '29'), ('uid', -1), ('uid', 4294967296)):
+            with self.subTest(key=key, value=value), patch.object(Path, 'iterdir', return_value=[Path('/proc/18')]), \
+                    patch.object(custody, 'process_metadata', return_value=dict(valid, **{key: value})), \
+                    patch.object(custody, 'identity') as identity, patch.object(Path, 'read_bytes') as environ:
+                with self.assertRaises(RuntimeError):
+                    custody.members(anchor, 'owned-lease', [anchor])
+            identity.assert_not_called()
+            environ.assert_not_called()
+
+    def test_invalid_older_recheck_metadata_remains_failure(self):
+        for key, value in (('startTicks', True), ('startTicks', None), ('startTicks', -1),
+                           ('startTicks', 9223372036854775808), ('uid', True), ('session', '18')):
+            candidate = {'pid': 18, 'session': 18, 'startTicks': 29, 'uid': 1001}
+            with self.subTest(key=key, value=value):
+                self.old_candidate_controls(18, recheck=dict(candidate, **{key: value}))
+
+    def test_real_census_nonce_failure_keeps_primary_and_known_child_settlement(self):
+        anchor = {'pid': 17, 'session': 17, 'startTicks': 30, 'uid': 1001, 'executable': '/sdk/dotnet'}
+        candidate = {'pid': 18, 'session': 18, 'startTicks': 31, 'uid': 1001}
+        primary = PermissionError(errno.EACCES, 'synthetic', '/proc/18/environ')
+        child = MagicMock(pid=17)
+        child.poll.return_value = None
+        def join(timeout=None):
+            child.returncode = -15
+            return -15
+        child.wait.side_effect = join
+        receipts = []
+        with patch.object(custody, 'physical_kib', return_value=4194304), \
+                patch.object(custody, 'source_pins', return_value={'testedCommit': 'synthetic'}), \
+                patch.object(custody.subprocess, 'Popen', return_value=child), \
+                patch.object(custody, 'identity', return_value=anchor), \
+                patch.object(Path, 'iterdir', return_value=[Path('/proc/18')]), \
+                patch.object(custody, 'process_metadata', return_value=candidate), \
+                patch.object(custody.os, 'getuid', return_value=1001, create=True), \
+                patch.object(Path, 'read_bytes', side_effect=primary), \
+                patch.object(custody, 'known_alive', return_value=([], [])), \
+                patch.object(custody, 'signal_exact') as stop, \
+                patch.object(custody.signal, 'SIGKILL', 9, create=True), \
+                patch.object(custody, 'cleanup_containers') as containers, \
+                patch.object(custody.time, 'monotonic', return_value=0), \
+                patch.object(Path, 'mkdir'), \
+                patch.object(Path, 'write_text', side_effect=lambda text: receipts.append(json.loads(text))):
+            with self.assertRaises(PermissionError) as result:
+                custody.execute('/sdk/dotnet', ['restore', custody.SOLUTION], 'restore', 3145728, {})
+            self.assertIs(primary, result.exception)
+        self.assertEqual([17], [call.args[0]['pid'] for call in stop.call_args_list])
+        child.wait.assert_any_call(timeout=5)
+        self.assertTrue(receipts[0]['retainedChildJoined'])
+        self.assertEqual(-15, receipts[0]['actualChildExitCode'])
+        self.assertFalse(receipts[0]['cleanupVerified'])
+        containers.assert_not_called()
+
     def test_proc_access_diagnostics_are_categorical_and_numeric_only(self):
         for access in ('stat', 'environ', 'exe'):
             for uid in (0, 1001):
@@ -225,31 +387,34 @@ class CustodyControls(unittest.TestCase):
         environment.assert_not_called()
 
     def test_same_uid_foreign_process_without_nonce_is_not_executable_probed(self):
+        anchor = {'pid': 17, 'session': 17, 'startTicks': 30, 'uid': 1001, 'executable': '/sdk/dotnet'}
         foreign = {'pid': 1, 'session': 1, 'startTicks': 1, 'state': 'S', 'uid': 1001}
         with patch.object(Path, 'iterdir', return_value=[Path('/proc/1')]), \
                 patch.object(custody, 'process_metadata', return_value=foreign), \
                 patch.object(custody, 'identity', side_effect=PermissionError('synthetic foreign executable')) as probe, \
                 patch.object(custody.os, 'getuid', return_value=1001, create=True), \
                 patch.object(Path, 'read_bytes', return_value=b'UNRELATED=synthetic\0'):
-            self.assertEqual([], custody.members({'pid': 17, 'session': 17, 'startTicks': 30, 'uid': 1001, 'executable': '/sdk/dotnet'}, 'synthetic-lease', []))
+            self.assertEqual([], custody.members(anchor, 'synthetic-lease', [anchor]))
         probe.assert_not_called()
 
     def test_unreadable_owned_executable_remains_failure(self):
+        anchor = {'pid': 17, 'session': 17, 'startTicks': 30, 'uid': 1001, 'executable': '/sdk/dotnet'}
         owned = {'pid': 17, 'session': 17, 'startTicks': 30, 'state': 'S', 'uid': 1001}
         with patch.object(Path, 'iterdir', return_value=[Path('/proc/17')]), \
                 patch.object(custody, 'process_metadata', return_value=owned), \
                 patch.object(custody, 'identity', side_effect=PermissionError('synthetic owned executable')):
             with self.assertRaises(PermissionError):
-                custody.members({'pid': 17, 'session': 17, 'startTicks': 30, 'uid': 1001, 'executable': '/sdk/dotnet'}, 'synthetic-lease', [])
+                custody.members(anchor, 'synthetic-lease', [anchor])
 
     def test_unreadable_same_uid_nonce_remains_uncertain_failure(self):
+        anchor = {'pid': 17, 'session': 17, 'startTicks': 30, 'uid': 1001, 'executable': '/sdk/dotnet'}
         uncertain = {'pid': 18, 'session': 18, 'startTicks': 31, 'state': 'S', 'uid': 1001}
         with patch.object(Path, 'iterdir', return_value=[Path('/proc/18')]), \
                 patch.object(custody, 'process_metadata', return_value=uncertain), \
                 patch.object(custody.os, 'getuid', return_value=1001, create=True), \
                 patch.object(Path, 'read_bytes', side_effect=PermissionError('synthetic unavailable ownership')):
             with self.assertRaises(PermissionError):
-                custody.members({'pid': 17, 'session': 17, 'startTicks': 30, 'uid': 1001, 'executable': '/sdk/dotnet'}, 'synthetic-lease', [])
+                custody.members(anchor, 'synthetic-lease', [anchor])
 
     def test_selection_race_refuses_changed_birth_before_executable_use(self):
         owned = {'pid': 17, 'session': 17, 'startTicks': 30, 'state': 'S', 'uid': 1001}
