@@ -5,6 +5,94 @@ namespace Legacy.Maliev.ContactService.Tests.Controllers;
 
 public sealed class ContactFixtureLifecycleTests
 {
+    [Fact]
+    public async Task CapturedIdentity_SurvivesDisposedGetterAndReceiptWriting()
+    {
+        var resource = new ReceiptResource();
+        var identity = new ContactFixtureReceiptIdentity();
+        var receipts = new List<string?>();
+        var lifecycle = new ContactFixtureLifecycle(
+            async token => { await resource.StartAsync(token); identity.Capture(resource.Id); },
+            _ => Task.CompletedTask,
+            async () => { await resource.DisposeAsync(); receipts.Add(identity.ContainerId); },
+            (_, _) => { });
+        await lifecycle.InitializeAsync(CancellationToken.None);
+        await lifecycle.DisposeAsync();
+        Assert.Equal(1, resource.GetterCalls);
+        Assert.Throws<InvalidOperationException>(() => resource.Id);
+        Assert.Equal(ReceiptResource.ActualId, Assert.Single(receipts));
+        Assert.Equal(ReceiptResource.ActualId, identity.ContainerId);
+    }
+
+    [Fact]
+    public async Task CapturedIdentity_DisposalFaultIsRecordedWithoutReplacingPrimary()
+    {
+        var resource = new ReceiptResource();
+        var identity = new ContactFixtureReceiptIdentity();
+        var primary = new IOException("synthetic migration failure");
+        var cleanup = new InvalidOperationException("synthetic dispose failure");
+        var failures = new List<(string Phase, Exception? Failure, string? ContainerId)>();
+        var lifecycle = new ContactFixtureLifecycle(
+            async token => { await resource.StartAsync(token); identity.Capture(resource.Id); },
+            _ => Task.FromException(primary),
+            async () => { await resource.DisposeAsync(); throw cleanup; },
+            (phase, failure) => failures.Add((phase, failure, identity.ContainerId)));
+        var observed = await Assert.ThrowsAsync<IOException>(() => lifecycle.InitializeAsync(CancellationToken.None));
+        Assert.Same(primary, observed);
+        Assert.Same(cleanup, observed.Data["ContactFixtureCleanupFailure"]);
+        var disposeFailure = await Assert.ThrowsAsync<InvalidOperationException>(() => lifecycle.DisposeAsync());
+        Assert.Same(cleanup, disposeFailure);
+        Assert.Contains(failures, row => row.Phase == "cleanup-failed" && ReferenceEquals(row.Failure, cleanup)
+            && row.ContainerId == ReceiptResource.ActualId);
+        Assert.Equal(1, resource.GetterCalls);
+        Assert.Equal(ReceiptResource.ActualId, identity.ContainerId);
+    }
+
+    [Fact]
+    public async Task UnsuccessfulStartup_LeavesReceiptIdentityUnknownWithoutGetterProbe()
+    {
+        var resource = new ReceiptResource();
+        var identity = new ContactFixtureReceiptIdentity();
+        var primary = new IOException("synthetic startup failure");
+        var receipts = new List<string?>();
+        var lifecycle = new ContactFixtureLifecycle(_ => Task.FromException(primary), _ => Task.CompletedTask,
+            async () => { await resource.DisposeAsync(); receipts.Add(identity.ContainerId); }, (_, _) => { });
+        var observed = await Assert.ThrowsAsync<IOException>(() => lifecycle.InitializeAsync(CancellationToken.None));
+        Assert.Same(primary, observed);
+        await lifecycle.DisposeAsync();
+        Assert.Null(Assert.Single(receipts));
+        Assert.Null(identity.ContainerId);
+        Assert.Equal(0, resource.GetterCalls);
+    }
+
+    private sealed class ReceiptResource
+    {
+        public const string ActualId = "synthetic-started-container";
+        private bool started;
+        private bool disposed;
+        public int GetterCalls { get; private set; }
+        public string Id
+        {
+            get
+            {
+                GetterCalls++;
+                if (!started || disposed) { throw new InvalidOperationException("Synthetic resource getter unavailable."); }
+                return ActualId;
+            }
+        }
+        public Task StartAsync(CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            started = true;
+            return Task.CompletedTask;
+        }
+        public Task DisposeAsync()
+        {
+            disposed = true;
+            return Task.CompletedTask;
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

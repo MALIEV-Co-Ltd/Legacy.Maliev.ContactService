@@ -835,6 +835,7 @@ public sealed class ContactRuntimePostgresFixture : IAsyncLifetime
     private readonly string lease = Guid.NewGuid().ToString("N");
     private readonly PostgreSqlContainer container;
     private readonly ContactFixtureLifecycle lifecycle;
+    private readonly ContactFixtureReceiptIdentity receiptIdentity = new();
 
     public ContactRuntimePostgresFixture()
     {
@@ -855,6 +856,7 @@ public sealed class ContactRuntimePostgresFixture : IAsyncLifetime
             {
                 ObserveAdmission("container-start");
                 await container.StartAsync(token);
+                receiptIdentity.Capture(container.Id);
                 Observe("container-start-settled", null);
             },
             async token =>
@@ -920,9 +922,27 @@ public sealed class ContactRuntimePostgresFixture : IAsyncLifetime
             phase,
             availableKiB,
             testedCommit = Environment.GetEnvironmentVariable("GITHUB_SHA"),
-            containerId = phase == "container-start-settled" || phase == "container-dispose-settled" ? container.Id : null,
+            containerId = phase == "container-start-settled" || phase == "container-dispose-settled" ? receiptIdentity.ContainerId : null,
             exceptionType = failure?.GetType().FullName,
         }) + Environment.NewLine);
+    }
+}
+
+/// <summary>Retains the actual started resource identity without querying it after disposal.</summary>
+internal sealed class ContactFixtureReceiptIdentity
+{
+    private string? containerId;
+
+    public string? ContainerId => Volatile.Read(ref containerId);
+
+    public void Capture(string actualContainerId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(actualContainerId);
+        var previous = Interlocked.CompareExchange(ref containerId, actualContainerId, null);
+        if (previous is not null && !string.Equals(previous, actualContainerId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Contact fixture receipt identity changed; preserve uncertainty.");
+        }
     }
 }
 
