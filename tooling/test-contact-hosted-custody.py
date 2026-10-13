@@ -14,6 +14,152 @@ spec.loader.exec_module(custody)
 
 
 class CustodyControls(unittest.TestCase):
+    def test_census_invalid_metadata_has_constant_stage_field_reason_and_numeric_context(self):
+        valid = {'pid': 18, 'session': 18, 'startTicks': 31, 'uid': 1001}
+        for field, value, kind in (('session', 0, 'range'), ('uid', True, 'type'),
+                                   ('startTicks', 9223372036854775808, 'range'), ('pid', 'SENSITIVE', 'type')):
+            with self.subTest(field=field):
+                with self.assertRaises(RuntimeError) as result:
+                    custody.validate_generation_metadata(dict(valid, **{field: value}), 'candidate-recheck')
+                self.assertIs(type(result.exception), RuntimeError)
+                context = custody.failure_context(result.exception)['censusGuard']
+                self.assertEqual('candidate-recheck', context['stage'])
+                self.assertEqual('metadata-invalid', context['reason'])
+                self.assertEqual(field, context['field'])
+                self.assertEqual(kind, context['invalidKind'])
+                self.assertTrue(context['capturedAtFailure'])
+                self.assertEqual('not-performed', context['ownershipDetermination'])
+                self.assertNotIn('SENSITIVE', json.dumps(context))
+
+    def test_census_unavailable_and_missing_metadata_keep_runtime_error_guard(self):
+        for metadata in (None, {'pid': 17, 'session': 17, 'uid': 1001}):
+            with self.subTest(metadata=metadata):
+                with self.assertRaises(RuntimeError) as result:
+                    custody.validate_generation_metadata(metadata, 'retained-anchor')
+                context = custody.failure_context(result.exception)['censusGuard']
+                self.assertEqual('retained-anchor', context['stage'])
+                if metadata is None:
+                    self.assertEqual('metadata-unavailable', context['reason'])
+                else:
+                    self.assertEqual('startTicks', context['field'])
+                    self.assertEqual('missing', context['invalidKind'])
+
+    def test_census_context_excludes_unapproved_content_and_caps_exact_numeric_types(self):
+        metadata = {'pid': 18, 'parentPid': 1, 'session': 0, 'startTicks': 9223372036854775808,
+                    'uid': True, 'state': 'SENSITIVE', 'argv': 'SENSITIVE', 'unapprovedField': 'SENSITIVE'}
+        primary = custody.census_runtime_error('SENSITIVE', 'candidate', 'metadata-invalid', 'session', 'range', metadata)
+        context = custody.failure_context(primary)
+        self.assertEqual({'pid': 18, 'parentPid': 1, 'session': 0}, context['censusGuard']['numericMetadata'])
+        self.assertNotIn('SENSITIVE', json.dumps(context))
+        self.assertNotIn('state', context['censusGuard']['numericMetadata'])
+
+    def test_census_diagnostic_attachment_failure_preserves_exact_primary(self):
+        primary = RuntimeError('SENSITIVE original')
+        with patch.object(custody, 'census_guard_context', side_effect=OSError('SENSITIVE recording')):
+            observed = custody.attach_census_guard_context(primary, 'candidate', 'metadata-invalid')
+        self.assertIs(primary, observed)
+        self.assertEqual({'exceptionType': 'RuntimeError'}, custody.failure_context(primary))
+
+    def test_census_diagnostic_copy_failure_does_not_replace_or_expose_primary(self):
+        primary = custody.census_runtime_error('SENSITIVE original', 'candidate', 'metadata-invalid')
+        with patch.object(custody, 'census_guard_context', side_effect=PermissionError('SENSITIVE recording')):
+            context = custody.failure_context(primary)
+        self.assertEqual({'exceptionType': 'RuntimeError', 'contextUnavailable': 'PermissionError'}, context)
+        with self.assertRaises(RuntimeError) as result:
+            raise primary
+        self.assertIs(primary, result.exception)
+        self.assertNotIn('SENSITIVE', json.dumps(context))
+
+    def test_custom_runtime_error_sensitive_getters_are_never_inspected(self):
+        calls = []
+        class CustomGuardError(RuntimeError):
+            def __getattribute__(self, name):
+                if name in ('_contact_census_guard', '__dict__', 'args', 'state'):
+                    calls.append(name)
+                    raise AssertionError('SENSITIVE getter')
+                return super().__getattribute__(name)
+            def __str__(self):
+                calls.append('str')
+                raise AssertionError('SENSITIVE message')
+            def __repr__(self):
+                calls.append('repr')
+                raise AssertionError('SENSITIVE repr')
+        primary = CustomGuardError()
+        self.assertIs(primary, custody.attach_census_guard_context(primary, 'candidate', 'metadata-invalid'))
+        self.assertEqual({'exceptionType': 'CustomGuardError'}, custody.failure_context(primary))
+        self.assertEqual([], calls)
+
+    def test_malformed_or_custom_census_records_do_not_supply_guard_context(self):
+        class UnreadableRecord(dict):
+            def get(self, *args):
+                raise AssertionError('SENSITIVE getter')
+        for record in (UnreadableRecord(stage='candidate'), object(),
+                       {'stage': 'SENSITIVE', 'reason': 'metadata-invalid'},
+                       {'stage': 'candidate', 'reason': 'SENSITIVE'},
+                       {'stage': 'candidate', 'reason': 'metadata-invalid', 'field': 'SENSITIVE'},
+                       {'stage': 'candidate', 'reason': 'metadata-invalid', 'invalidKind': 'SENSITIVE'}):
+            with self.subTest(recordType=type(record).__name__):
+                primary = RuntimeError('SENSITIVE')
+                primary._contact_census_guard = record
+                self.assertEqual({'exceptionType': 'RuntimeError'}, custody.failure_context(primary))
+
+    def test_census_record_drops_arbitrary_attributes_and_custom_numeric_getters(self):
+        class UnreadableMetadata(dict):
+            def get(self, *args):
+                raise AssertionError('SENSITIVE getter')
+        primary = RuntimeError('SENSITIVE')
+        primary._contact_census_guard = {'stage': 'candidate', 'reason': 'metadata-invalid',
+                                        'numericMetadata': UnreadableMetadata(pid=18), 'message': 'SENSITIVE',
+                                        'state': 'SENSITIVE', 'argv': 'SENSITIVE'}
+        context = custody.failure_context(primary)
+        self.assertEqual('candidate', context['censusGuard']['stage'])
+        self.assertNotIn('numericMetadata', context['censusGuard'])
+        self.assertNotIn('SENSITIVE', json.dumps(context))
+
+    def test_real_census_runtime_guard_preserves_primary_and_joins_child_without_cleanup_acceptance(self):
+        anchor = {'pid': 17, 'session': 17, 'startTicks': 30, 'uid': 1001, 'executable': '/sdk/dotnet'}
+        candidate = {'pid': 18, 'session': 0, 'startTicks': 1, 'uid': 0}
+        child = MagicMock(pid=17)
+        child.poll.return_value = None
+        def join(timeout=None):
+            child.returncode = -15
+            return -15
+        child.wait.side_effect = join
+        receipts = []
+        failures = []
+        attach = custody.attach_census_guard_context
+        def observe(failure, *args, **kwargs):
+            failures.append(failure)
+            return attach(failure, *args, **kwargs)
+        with patch.object(custody, 'physical_kib', return_value=4194304), \
+                patch.object(custody, 'source_pins', return_value={'testedCommit': 'synthetic'}), \
+                patch.object(custody.subprocess, 'Popen', return_value=child), \
+                patch.object(custody, 'identity', return_value=anchor), \
+                patch.object(Path, 'iterdir', return_value=[Path('/proc/18')]), \
+                patch.object(custody, 'process_metadata', return_value=candidate) as metadata, \
+                patch.object(custody, 'attach_census_guard_context', side_effect=observe), \
+                patch.object(Path, 'read_bytes') as environment, \
+                patch.object(custody, 'known_alive', return_value=([], [])), \
+                patch.object(custody, 'signal_exact') as stop, \
+                patch.object(custody.signal, 'SIGKILL', 9, create=True), \
+                patch.object(custody, 'cleanup_containers') as containers, \
+                patch.object(custody.time, 'monotonic', return_value=0), \
+                patch.object(Path, 'mkdir'), \
+                patch.object(Path, 'write_text', side_effect=lambda text: receipts.append(json.loads(text))):
+            with self.assertRaises(RuntimeError) as result:
+                custody.execute('/sdk/dotnet', ['restore', custody.SOLUTION], 'restore', 3145728, {})
+            self.assertIs(failures[0], result.exception)
+        self.assertEqual([18, 18], [call.args[0] for call in metadata.call_args_list])
+        environment.assert_not_called()
+        self.assertEqual([17], [call.args[0]['pid'] for call in stop.call_args_list])
+        self.assertEqual('candidate', receipts[0]['failureContext']['censusGuard']['stage'])
+        self.assertEqual('session', receipts[0]['failureContext']['censusGuard']['field'])
+        self.assertEqual('range', receipts[0]['failureContext']['censusGuard']['invalidKind'])
+        self.assertTrue(receipts[0]['retainedChildJoined'])
+        self.assertEqual(-15, receipts[0]['actualChildExitCode'])
+        self.assertFalse(receipts[0]['cleanupVerified'])
+        containers.assert_not_called()
+
     def old_candidate_controls(self, session, recheck=..., failure=None):
         anchor = {'pid': 17, 'session': 17, 'startTicks': 30, 'uid': 1001, 'executable': '/sdk/dotnet'}
         candidate = {'pid': 18, 'session': session, 'startTicks': 29, 'uid': 1001}
