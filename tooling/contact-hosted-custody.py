@@ -63,7 +63,7 @@ def process_metadata(pid):
     try:
         raw = Path(f'/proc/{pid}/stat').read_text()
         fields = raw[raw.rfind(')') + 2:].split()
-        return {'pid': pid, 'session': int(fields[3]), 'startTicks': int(fields[19]),
+        return {'pid': pid, 'parentPid': int(fields[1]), 'session': int(fields[3]), 'startTicks': int(fields[19]),
                 'state': fields[0], 'uid': Path(f'/proc/{pid}').stat().st_uid}
     except (FileNotFoundError, ProcessLookupError):
         return None
@@ -164,6 +164,40 @@ def known_alive(retained):
     return alive, failures
 
 
+def failure_context(failure):
+    """Retain only typed procfs access context, never messages or environment bytes."""
+    context = {'exceptionType': type(failure).__name__}
+    try:
+        if not isinstance(failure, OSError):
+            return context
+        filename = failure.filename
+        match = re.fullmatch(r'/proc/([0-9]+)(?:/(stat|environ|exe))?', filename) if isinstance(filename, str) else None
+        if match is None:
+            return context
+        pid = int(match.group(1))
+        if not 0 < pid <= 2147483647:
+            return context
+        context.update(procPid=pid, procAccess=match.group(2) or 'directory-stat', observedAfterFailure=True,
+                       ownershipDetermination='not-performed')
+        number = failure.errno
+        if type(number) is int and 0 <= number <= 65535:
+            context['errno'] = number
+        try:
+            metadata = process_metadata(pid)
+            if metadata is not None:
+                numeric = {key: metadata[key] for key in ('pid', 'parentPid', 'session', 'startTicks', 'uid')
+                           if type(metadata.get(key)) is int and 0 <= metadata[key] <= 9223372036854775807}
+                state = metadata.get('state')
+                if type(state) is str and state in ('R', 'S', 'D', 'Z', 'T', 't', 'X', 'x', 'K', 'W', 'P', 'I', 'N'):
+                    numeric['state'] = state
+                context['observedMetadata'] = numeric
+        except BaseException as observation:
+            context['metadataUnavailable'] = type(observation).__name__
+    except BaseException as recording:
+        context['contextUnavailable'] = type(recording).__name__
+    return context
+
+
 def signal_exact(row, number):
     observed = identity(row['pid'])
     if observed is None:
@@ -248,6 +282,7 @@ def execute(executable, arguments, phase, floor, environment):
     except BaseException as failure:
         primary = failure
         receipt['classification'] = type(failure).__name__
+        receipt['failureContext'] = failure_context(failure)
     finally:
         if child is None:
             receipt['terminal'] = True
@@ -260,6 +295,7 @@ def execute(executable, arguments, phase, floor, environment):
             except BaseException as census:
                 census_failed = True
                 receipt['cleanupFailures'].append(type(census).__name__)
+                receipt.setdefault('cleanupFailureContexts', []).append(failure_context(census))
             for row in current:
                 if not any(old['pid'] == row['pid'] and old['startTicks'] == row['startTicks'] for old in receipt['ownedProcesses']):
                     receipt['ownedProcesses'].append(row)
@@ -285,6 +321,7 @@ def execute(executable, arguments, phase, floor, environment):
                         except BaseException as census:
                             census_failed = True
                             receipt['cleanupFailures'].append(type(census).__name__)
+                            receipt.setdefault('cleanupFailureContexts', []).append(failure_context(census))
                     survivors, observation_failures = known_alive(receipt['ownedProcesses'])
                     receipt['cleanupFailures'].extend(observation_failures)
                     if not survivors or time.monotonic() >= grace:
@@ -293,6 +330,7 @@ def execute(executable, arguments, phase, floor, environment):
             except BaseException as census:
                 census_failed = True
                 receipt['cleanupFailures'].append(type(census).__name__)
+                receipt.setdefault('cleanupFailureContexts', []).append(failure_context(census))
             survivors, observation_failures = known_alive(receipt['ownedProcesses'])
             receipt['cleanupFailures'].extend(observation_failures)
             for row in survivors:
@@ -304,6 +342,8 @@ def execute(executable, arguments, phase, floor, environment):
             try:
                 child.wait(timeout=5)
                 receipt['retainedChildJoined'] = True
+                actual_exit = child.returncode
+                receipt['actualChildExitCode'] = actual_exit if type(actual_exit) is int and -2147483648 <= actual_exit <= 2147483647 else None
             except BaseException as cleanup:
                 receipt['cleanupFailures'].append(type(cleanup).__name__)
             try:

@@ -1,5 +1,6 @@
 """Control failure paths without starting an SDK, process, or container."""
 import datetime as dt
+import errno
 import importlib.util
 import json
 from pathlib import Path
@@ -12,6 +13,116 @@ spec.loader.exec_module(custody)
 
 
 class CustodyControls(unittest.TestCase):
+    def test_proc_access_diagnostics_are_categorical_and_numeric_only(self):
+        for access in ('stat', 'environ', 'exe'):
+            for uid in (0, 1001):
+                with self.subTest(access=access, uid=uid):
+                    primary = PermissionError(errno.EACCES, 'SENSITIVE synthetic message', '/proc/41/' + access)
+                    metadata = {'pid': 41, 'session': 4, 'startTicks': 100, 'uid': uid, 'state': 'S', 'secret': 'SENSITIVE synthetic data'}
+                    with patch.object(custody, 'process_metadata', return_value=metadata):
+                        context = custody.failure_context(primary)
+                    self.assertEqual(41, context['procPid'])
+                    self.assertEqual(access, context['procAccess'])
+                    self.assertEqual(errno.EACCES, context['errno'])
+                    self.assertTrue(context['observedAfterFailure'])
+                    self.assertEqual('not-performed', context['ownershipDetermination'])
+                    self.assertNotIn('SENSITIVE', json.dumps(context))
+                    self.assertEqual({'pid', 'session', 'startTicks', 'uid', 'state'}, set(context['observedMetadata']))
+
+    def test_denied_metadata_keeps_primary_proc_access_without_reading_content(self):
+        primary = PermissionError(errno.EACCES, 'SENSITIVE', '/proc/41/environ')
+        with patch.object(custody, 'process_metadata', side_effect=PermissionError('synthetic metadata denial')), \
+                patch.object(Path, 'read_bytes') as content:
+            context = custody.failure_context(primary)
+        self.assertEqual('environ', context['procAccess'])
+        self.assertEqual('PermissionError', context['metadataUnavailable'])
+        content.assert_not_called()
+
+    def test_unknown_or_sensitive_filename_and_invalid_pid_are_not_retained(self):
+        for filename in ('/private/customer-data', '/proc/0/environ', '/proc/2147483648/exe', '/proc/41/fd/3'):
+            with self.subTest(filename=filename), patch.object(custody, 'process_metadata') as metadata:
+                context = custody.failure_context(PermissionError(errno.EACCES, 'SENSITIVE', filename))
+            self.assertEqual({'exceptionType': 'PermissionError'}, context)
+            metadata.assert_not_called()
+
+    def test_throwing_diagnostic_getter_is_guarded(self):
+        class UnreadableDiagnostic(PermissionError):
+            def __getattribute__(self, name):
+                if name == 'filename':
+                    raise RuntimeError('SENSITIVE synthetic getter')
+                return super().__getattribute__(name)
+        context = custody.failure_context(UnreadableDiagnostic())
+        self.assertEqual('RuntimeError', context['contextUnavailable'])
+        self.assertNotIn('SENSITIVE', json.dumps(context))
+
+    def test_pid_birth_snapshot_is_observation_not_original_ownership(self):
+        primary = PermissionError(errno.EACCES, 'synthetic primary', '/proc/41/environ')
+        replacement = {'pid': 41, 'session': 41, 'startTicks': 999, 'uid': 1001, 'state': 'R'}
+        with patch.object(custody, 'process_metadata', return_value=replacement):
+            context = custody.failure_context(primary)
+        self.assertEqual(999, context['observedMetadata']['startTicks'])
+        self.assertTrue(context['observedAfterFailure'])
+        self.assertEqual('not-performed', context['ownershipDetermination'])
+
+    def test_diagnostic_primary_remains_exact_and_retained_child_is_joined(self):
+        primary = PermissionError(errno.EACCES, 'SENSITIVE', '/proc/41/environ')
+        with patch.object(custody, 'process_metadata', side_effect=PermissionError('synthetic metadata denial')):
+            receipt = self.verify_census_failure_settles_known_owner(False, primary)
+        self.assertEqual(41, receipt['failureContext']['procPid'])
+        self.assertEqual('environ', receipt['failureContext']['procAccess'])
+        self.assertEqual('PermissionError', receipt['failureContext']['metadataUnavailable'])
+        self.assertTrue(receipt['retainedChildJoined'])
+        self.assertEqual(0, receipt['actualChildExitCode'])
+        self.assertFalse(receipt['cleanupVerified'])
+        self.assertNotIn('SENSITIVE', json.dumps(receipt))
+
+    def test_proc_diagnostic_and_receipt_recording_failure_do_not_mask_primary(self):
+        primary = PermissionError(errno.EACCES, 'SENSITIVE', '/proc/41/environ')
+        with patch.object(custody, 'process_metadata', side_effect=PermissionError('synthetic metadata denial')):
+            observed = self.execute_with_recording_failure('cancel', primary)
+        self.assertIs(primary, observed)
+
+    def test_proc_directory_stat_diagnostic_is_categorical_and_numeric_only(self):
+        primary = PermissionError(errno.EACCES, 'SENSITIVE', '/proc/41')
+        metadata = {'pid': 41, 'parentPid': 1, 'session': 4, 'startTicks': 100,
+                    'uid': 1001, 'state': 'S', 'secret': 'SENSITIVE'}
+        with patch.object(custody, 'process_metadata', return_value=metadata):
+            context = custody.failure_context(primary)
+        self.assertEqual(41, context['procPid'])
+        self.assertEqual('directory-stat', context['procAccess'])
+        self.assertEqual(errno.EACCES, context['errno'])
+        self.assertEqual('not-performed', context['ownershipDetermination'])
+        self.assertTrue(context['observedAfterFailure'])
+        self.assertEqual({key: metadata[key] for key in ('pid', 'parentPid', 'session', 'startTicks', 'uid', 'state')},
+                         context['observedMetadata'])
+        self.assertNotIn('SENSITIVE', json.dumps(context))
+        for filename in ('/proc/41/', '/proc/41/status', '/proc/41/fd', '/proc/41/../42', '/proc/0', '/proc/2147483648'):
+            with self.subTest(filename=filename), patch.object(custody, 'process_metadata') as probe:
+                context = custody.failure_context(PermissionError(errno.EACCES, 'SENSITIVE', filename))
+            self.assertEqual({'exceptionType': 'PermissionError'}, context)
+            probe.assert_not_called()
+
+    def test_directory_stat_failure_keeps_exact_primary_and_failed_census(self):
+        primary = PermissionError(errno.EACCES, 'SENSITIVE', '/proc/41')
+        with patch.object(custody, 'process_metadata', side_effect=primary):
+            receipt = self.verify_census_failure_settles_known_owner(False, primary)
+        self.assertEqual(41, receipt['failureContext']['procPid'])
+        self.assertEqual('directory-stat', receipt['failureContext']['procAccess'])
+        self.assertEqual(errno.EACCES, receipt['failureContext']['errno'])
+        self.assertEqual('PermissionError', receipt['failureContext']['metadataUnavailable'])
+        self.assertTrue(receipt['retainedChildJoined'])
+        self.assertFalse(receipt['cleanupVerified'])
+        self.assertNotIn('SENSITIVE', json.dumps(receipt))
+
+    def test_diagnostic_numeric_caps_and_state_allowlist_reject_untyped_content(self):
+        primary = PermissionError(70000, 'SENSITIVE', '/proc/41/stat')
+        metadata = {'pid': 41, 'session': 'SENSITIVE', 'startTicks': 9223372036854775808, 'uid': True, 'state': 'SENSITIVE'}
+        with patch.object(custody, 'process_metadata', return_value=metadata):
+            context = custody.failure_context(primary)
+        self.assertNotIn('errno', context)
+        self.assertEqual({'pid': 41}, context['observedMetadata'])
+        self.assertNotIn('SENSITIVE', json.dumps(context))
+
     def test_recycled_session_generation_never_promotes_foreign_rows(self):
         original = {'pid': 17, 'session': 17, 'startTicks': 30, 'uid': 1001, 'executable': '/sdk/dotnet'}
         replacement = dict(original, startTicks=31, state='S')
@@ -146,12 +257,12 @@ class CustodyControls(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'ownership changed'):
                 custody.selected_identity(owned)
 
-    def verify_census_failure_settles_known_owner(self, sdk_completed):
+    def verify_census_failure_settles_known_owner(self, sdk_completed, primary=None):
         child = MagicMock(pid=17)
         child.returncode = 0
         child.poll.return_value = 0 if sdk_completed else None
         child.wait.return_value = 0
-        primary = PermissionError('synthetic census failure')
+        primary = primary if primary is not None else PermissionError('synthetic census failure')
         actual = {'pid': 17, 'session': 17, 'startTicks': 30, 'state': 'S', 'uid': 1001, 'executable': '/sdk/dotnet'}
         receipts = []
         with patch.object(custody, 'physical_kib', return_value=4194304), \
@@ -176,6 +287,7 @@ class CustodyControls(unittest.TestCase):
         self.assertFalse(receipts[0]['terminal'])
         self.assertFalse(receipts[0]['cleanupVerified'])
         containers.assert_not_called()
+        return receipts[0]
 
     def test_census_primary_does_not_skip_known_owner_settlement(self):
         self.verify_census_failure_settles_known_owner(False)
