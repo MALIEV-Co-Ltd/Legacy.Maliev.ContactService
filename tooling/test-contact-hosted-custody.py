@@ -18,7 +18,7 @@ class CustodyControls(unittest.TestCase):
             for uid in (0, 1001):
                 with self.subTest(access=access, uid=uid):
                     primary = PermissionError(errno.EACCES, 'SENSITIVE synthetic message', '/proc/41/' + access)
-                    metadata = {'pid': 41, 'session': 4, 'startTicks': 100, 'uid': uid, 'state': 'S', 'secret': 'SENSITIVE synthetic data'}
+                    metadata = {'pid': 41, 'session': 4, 'startTicks': 100, 'uid': uid, 'state': 'S', 'unapprovedField': 'SENSITIVE synthetic data'}
                     with patch.object(custody, 'process_metadata', return_value=metadata):
                         context = custody.failure_context(primary)
                     self.assertEqual(41, context['procPid'])
@@ -85,7 +85,7 @@ class CustodyControls(unittest.TestCase):
     def test_proc_directory_stat_diagnostic_is_categorical_and_numeric_only(self):
         primary = PermissionError(errno.EACCES, 'SENSITIVE', '/proc/41')
         metadata = {'pid': 41, 'parentPid': 1, 'session': 4, 'startTicks': 100,
-                    'uid': 1001, 'state': 'S', 'secret': 'SENSITIVE'}
+                    'uid': 1001, 'state': 'S', 'unapprovedField': 'SENSITIVE'}
         with patch.object(custody, 'process_metadata', return_value=metadata):
             context = custody.failure_context(primary)
         self.assertEqual(41, context['procPid'])
