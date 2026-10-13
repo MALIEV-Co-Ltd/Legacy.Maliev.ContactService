@@ -14,6 +14,93 @@ spec.loader.exec_module(custody)
 
 
 class CustodyControls(unittest.TestCase):
+    def candidate_zero_controls(self, candidate, environment=b'UNRELATED=synthetic\0', recheck=...,
+                                environment_failure=None, nonce=False, retained=False):
+        anchor = {'pid': 6512, 'session': 6512, 'startTicks': 11505, 'uid': 1001, 'executable': '/sdk/dotnet'}
+        observed = dict(candidate) if recheck is ... else recheck
+        primary = environment_failure if environment_failure is not None else observed if isinstance(observed, BaseException) else None
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(Path, 'iterdir', return_value=[Path('/proc/' + str(candidate['pid']))]))
+            metadata = stack.enter_context(patch.object(custody, 'process_metadata', side_effect=[candidate, observed]))
+            stack.enter_context(patch.object(custody.os, 'getuid', return_value=1001, create=True))
+            content = b'CONTACT_HOSTED_RUN_LEASE=owned-lease\0' if nonce else environment
+            environ = stack.enter_context(patch.object(Path, 'read_bytes', side_effect=environment_failure,
+                                                       return_value=content))
+            forbidden = [stack.enter_context(patch.object(custody, name,
+                side_effect=AssertionError('Ownership getter forbidden')))
+                for name in ('identity', 'selected_identity', 'live_original_leader', 'signal_exact')]
+            forbidden.append(stack.enter_context(patch.object(custody.os, 'kill',
+                side_effect=AssertionError('Signal forbidden'))))
+            known = [anchor, dict(candidate, executable='/sdk/retained')] if retained else [anchor]
+            if primary is not None:
+                with self.assertRaises(type(primary)) as result:
+                    custody.members(anchor, 'owned-lease', known)
+                self.assertIs(primary, result.exception)
+            elif nonce or retained or recheck is not ...:
+                with self.assertRaises(RuntimeError):
+                    custody.members(anchor, 'owned-lease', known)
+            else:
+                self.assertEqual([], custody.members(anchor, 'owned-lease', known))
+            expected_reads = 1 if nonce or retained or environment_failure is not None else 2
+            self.assertEqual([candidate['pid']] * expected_reads,
+                             [call.args[0] for call in metadata.call_args_list])
+            if candidate['uid'] == 1001 and not retained:
+                environ.assert_called_once_with()
+            else:
+                environ.assert_not_called()
+            for probe in forbidden:
+                probe.assert_not_called()
+
+    def test_actual_newer_6884_zero_session_shape_is_rechecked_and_preserved(self):
+        self.candidate_zero_controls({'pid': 6884, 'parentPid': 2, 'session': 0,
+                                      'startTicks': 12241, 'uid': 0})
+
+    def test_zero_session_foreign_numeric_ids_have_no_special_exception(self):
+        for pid, parent, uid in ((6884, 2, 0), (8001, 8000, 42), (9911, 9, 2001)):
+            with self.subTest(pid=pid, uid=uid):
+                self.candidate_zero_controls({'pid': pid, 'parentPid': parent, 'session': 0,
+                                              'startTicks': 12241, 'uid': uid})
+
+    def test_equal_newer_current_uid_zero_without_nonce_is_rechecked(self):
+        for birth in (11505, 12241):
+            with self.subTest(birth=birth):
+                self.candidate_zero_controls({'pid': 6884, 'session': 0, 'startTicks': birth, 'uid': 1001})
+
+    def test_zero_session_actual_nonce_rejects_before_executable_or_signals(self):
+        self.candidate_zero_controls({'pid': 6884, 'session': 0, 'startTicks': 12241, 'uid': 1001}, nonce=True)
+
+    def test_zero_session_retained_newer_owner_still_rejects_before_getters(self):
+        self.candidate_zero_controls({'pid': 6884, 'session': 0, 'startTicks': 12241, 'uid': 1001}, retained=True)
+
+    def test_equal_newer_zero_current_uid_permission_failure_remains_primary(self):
+        for birth in (11505, 12241):
+            with self.subTest(birth=birth):
+                self.candidate_zero_controls({'pid': 6884, 'session': 0, 'startTicks': birth, 'uid': 1001},
+                    environment_failure=PermissionError(errno.EACCES, 'synthetic', '/proc/6884/environ'))
+
+    def test_current_uid_zero_unavailable_nonce_cannot_supply_exclusion(self):
+        for primary in (FileNotFoundError('synthetic'), ProcessLookupError('synthetic')):
+            with self.subTest(primary=type(primary).__name__):
+                self.candidate_zero_controls({'pid': 6884, 'session': 0, 'startTicks': 12241, 'uid': 1001},
+                    environment_failure=primary)
+
+    def test_newer_zero_recheck_changed_missing_invalid_remains_fail_closed(self):
+        candidate = {'pid': 6884, 'parentPid': 2, 'session': 0, 'startTicks': 12241, 'uid': 0}
+        for recheck in (None, dict(candidate, pid=6885), dict(candidate, session=6512),
+                        dict(candidate, startTicks=12242), dict(candidate, uid=1001),
+                        dict(candidate, session=True), dict(candidate, session=-1),
+                        dict(candidate, session=2147483648)):
+            with self.subTest(recheck=recheck):
+                self.candidate_zero_controls(candidate, recheck=recheck)
+
+    def test_newer_zero_recheck_permission_failure_preserves_primary(self):
+        self.candidate_zero_controls({'pid': 6884, 'session': 0, 'startTicks': 12241, 'uid': 0},
+            recheck=PermissionError(errno.EACCES, 'synthetic', '/proc/6884/stat'))
+
+    def test_current_uid_zero_no_nonce_changed_recheck_is_not_exclusion(self):
+        candidate = {'pid': 6884, 'session': 0, 'startTicks': 12241, 'uid': 1001}
+        self.candidate_zero_controls(candidate, recheck=dict(candidate, startTicks=12242))
+
     def zero_session_candidate_controls(self, birth=33, recheck=..., retained=False):
         anchor = {'pid': 5710, 'session': 5710, 'startTicks': 6376, 'uid': 1001, 'executable': '/sdk/dotnet'}
         candidate = {'pid': 2, 'parentPid': 0, 'session': 0, 'startTicks': birth, 'uid': 0}
@@ -22,11 +109,12 @@ class CustodyControls(unittest.TestCase):
         with ExitStack() as stack:
             stack.enter_context(patch.object(Path, 'iterdir', return_value=[Path('/proc/2')]))
             metadata = stack.enter_context(patch.object(custody, 'process_metadata', side_effect=effects))
+            stack.enter_context(patch.object(custody.os, 'getuid', return_value=1001, create=True))
             forbidden = [stack.enter_context(patch.object(custody, name, side_effect=AssertionError('Foreign getter forbidden')))
                          for name in ('identity', 'selected_identity', 'live_original_leader', 'signal_exact')]
             forbidden.append(stack.enter_context(patch.object(Path, 'read_bytes', side_effect=AssertionError('Foreign environ forbidden'))))
             forbidden.append(stack.enter_context(patch.object(custody.os, 'kill', side_effect=AssertionError('Foreign signal forbidden'))))
-            expected_failure = retained or birth >= anchor['startTicks'] or recheck is not ...
+            expected_failure = retained or recheck is not ...
             if expected_failure:
                 error_type = type(recheck) if isinstance(recheck, BaseException) else RuntimeError
                 with self.assertRaises(error_type) as result:
@@ -35,7 +123,7 @@ class CustodyControls(unittest.TestCase):
                     self.assertIs(recheck, result.exception)
             else:
                 self.assertEqual([], custody.members(anchor, 'owned-lease', known))
-            expected_reads = [2] if retained or birth >= anchor['startTicks'] else [2, 2]
+            expected_reads = [2] if retained else [2, 2]
             self.assertEqual(expected_reads, [call.args[0] for call in metadata.call_args_list])
             for probe in forbidden:
                 probe.assert_not_called()
@@ -43,7 +131,7 @@ class CustodyControls(unittest.TestCase):
     def test_actual_zero_session_older_shape_is_rechecked_without_ownership_or_foreign_getters(self):
         self.zero_session_candidate_controls()
 
-    def test_equal_and_newer_zero_session_fail_before_ownership_getters(self):
+    def test_equal_and_newer_zero_session_are_rechecked_without_ownership_getters(self):
         for birth in (6376, 6377):
             with self.subTest(birth=birth):
                 self.zero_session_candidate_controls(birth=birth)
@@ -194,7 +282,7 @@ class CustodyControls(unittest.TestCase):
 
     def test_real_census_runtime_guard_preserves_primary_and_joins_child_without_cleanup_acceptance(self):
         anchor = {'pid': 17, 'session': 17, 'startTicks': 30, 'uid': 1001, 'executable': '/sdk/dotnet'}
-        candidate = {'pid': 18, 'session': 0, 'startTicks': 31, 'uid': 0}
+        candidate = {'pid': 18, 'session': -1, 'startTicks': 31, 'uid': 0}
         child = MagicMock(pid=17)
         child.poll.return_value = None
         def join(timeout=None):
