@@ -155,12 +155,12 @@ def members(anchor, lease, retained):
                 raise census_runtime_error('Older candidate generation changed; preserve uncertainty',
                                            'candidate-recheck', 'generation-changed', metadata=rechecked)
             continue
-        # Zero-session metadata can exclude only a rechecked older generation;
-        # it never supplies retained, live-session or nonce ownership evidence.
-        validate_generation_metadata(row, 'candidate')
+        # Candidate SID zero is legal metadata, never SDK ownership evidence.
+        # Keep positive sessions mandatory at every ownership selection below.
         # Sanitized nested proof children can lack the nonce. Admit them only
         # while the original leader generation is live before and after selection.
         if row['session'] == anchor['session'] and live_original_leader(anchor):
+            validate_generation_metadata(row, 'candidate')
             actual = selected_identity(row)
             if actual is not None and live_original_leader(anchor):
                 rows.append(actual)
@@ -169,8 +169,11 @@ def members(anchor, lease, retained):
             try:
                 environment = Path(f'/proc/{pid}/environ').read_bytes().split(b'\0')
             except (FileNotFoundError, ProcessLookupError):
+                if row['session'] == 0:
+                    raise
                 continue
             if ('CONTACT_HOSTED_RUN_LEASE=' + lease).encode() in environment:
+                validate_generation_metadata(row, 'candidate')
                 actual = selected_identity(row)
                 if actual is not None:
                     rows.append(actual)
@@ -181,6 +184,12 @@ def members(anchor, lease, retained):
             if not (replaced and current_leader['session'] == anchor['session']):
                 raise census_runtime_error('Original session generation unverified; preserve unmarked members',
                                            'session-generation', 'session-unverified', metadata=row)
+        if row['session'] == 0:
+            rechecked = process_metadata(pid)
+            validate_generation_metadata(rechecked, 'candidate-recheck', allow_zero_session=True)
+            if not same_generation(rechecked, row):
+                raise census_runtime_error('Zero-session candidate generation changed; preserve uncertainty',
+                                           'candidate-recheck', 'generation-changed', metadata=rechecked)
         # Unknown/foreign rows never gain ownership from a recycled numeric SID.
     return rows
 
