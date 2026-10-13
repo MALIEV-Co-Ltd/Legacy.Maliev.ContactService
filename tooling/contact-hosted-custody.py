@@ -105,8 +105,8 @@ def live_original_leader(anchor):
     return True
 
 
-def validate_generation_metadata(row, stage='candidate'):
-    bounds = {'pid': (1, 2147483647), 'session': (1, 2147483647),
+def validate_generation_metadata(row, stage='candidate', allow_zero_session=False):
+    bounds = {'pid': (1, 2147483647), 'session': (0 if allow_zero_session is True else 1, 2147483647),
               'startTicks': (0, 9223372036854775807), 'uid': (0, 4294967295)}
     if not isinstance(row, dict):
         raise census_runtime_error('Process generation metadata unavailable; preserve uncertainty',
@@ -136,9 +136,10 @@ def members(anchor, lease, retained):
         row = process_metadata(pid)
         if row is None:
             continue
-        validate_generation_metadata(row, 'candidate')
+        validate_generation_metadata(row, 'candidate', allow_zero_session=True)
         known = next((old for old in retained if same_generation(row, old)), None)
         if known is not None:
+            validate_generation_metadata(row, 'candidate')
             actual = selected_identity(row)
             if actual is not None:
                 rows.append(actual)
@@ -148,11 +149,14 @@ def members(anchor, lease, retained):
         # Recheck cheap metadata before exclusion; a reuse race stays uncertain.
         if row['startTicks'] < anchor['startTicks']:
             rechecked = process_metadata(pid)
-            validate_generation_metadata(rechecked, 'candidate-recheck')
+            validate_generation_metadata(rechecked, 'candidate-recheck', allow_zero_session=True)
             if not same_generation(rechecked, row):
                 raise census_runtime_error('Older candidate generation changed; preserve uncertainty',
                                            'candidate-recheck', 'generation-changed', metadata=rechecked)
             continue
+        # Zero-session metadata can exclude only a rechecked older generation;
+        # it never supplies retained, live-session or nonce ownership evidence.
+        validate_generation_metadata(row, 'candidate')
         # Sanitized nested proof children can lack the nonce. Admit them only
         # while the original leader generation is live before and after selection.
         if row['session'] == anchor['session'] and live_original_leader(anchor):

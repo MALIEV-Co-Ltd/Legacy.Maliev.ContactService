@@ -14,6 +14,82 @@ spec.loader.exec_module(custody)
 
 
 class CustodyControls(unittest.TestCase):
+    def zero_session_candidate_controls(self, birth=33, recheck=..., retained=False):
+        anchor = {'pid': 5710, 'session': 5710, 'startTicks': 6376, 'uid': 1001, 'executable': '/sdk/dotnet'}
+        candidate = {'pid': 2, 'parentPid': 0, 'session': 0, 'startTicks': birth, 'uid': 0}
+        effects = [candidate, dict(candidate) if recheck is ... else recheck]
+        known = [anchor, dict(candidate, executable='/sdk/retained')] if retained else [anchor]
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(Path, 'iterdir', return_value=[Path('/proc/2')]))
+            metadata = stack.enter_context(patch.object(custody, 'process_metadata', side_effect=effects))
+            forbidden = [stack.enter_context(patch.object(custody, name, side_effect=AssertionError('Foreign getter forbidden')))
+                         for name in ('identity', 'selected_identity', 'live_original_leader', 'signal_exact')]
+            forbidden.append(stack.enter_context(patch.object(Path, 'read_bytes', side_effect=AssertionError('Foreign environ forbidden'))))
+            forbidden.append(stack.enter_context(patch.object(custody.os, 'kill', side_effect=AssertionError('Foreign signal forbidden'))))
+            expected_failure = retained or birth >= anchor['startTicks'] or recheck is not ...
+            if expected_failure:
+                error_type = type(recheck) if isinstance(recheck, BaseException) else RuntimeError
+                with self.assertRaises(error_type) as result:
+                    custody.members(anchor, 'owned-lease', known)
+                if isinstance(recheck, BaseException):
+                    self.assertIs(recheck, result.exception)
+            else:
+                self.assertEqual([], custody.members(anchor, 'owned-lease', known))
+            expected_reads = [2] if retained or birth >= anchor['startTicks'] else [2, 2]
+            self.assertEqual(expected_reads, [call.args[0] for call in metadata.call_args_list])
+            for probe in forbidden:
+                probe.assert_not_called()
+
+    def test_actual_zero_session_older_shape_is_rechecked_without_ownership_or_foreign_getters(self):
+        self.zero_session_candidate_controls()
+
+    def test_equal_and_newer_zero_session_fail_before_ownership_getters(self):
+        for birth in (6376, 6377):
+            with self.subTest(birth=birth):
+                self.zero_session_candidate_controls(birth=birth)
+
+    def test_retained_zero_session_fails_before_selection_even_when_older(self):
+        self.zero_session_candidate_controls(retained=True)
+
+    def test_zero_session_anchor_and_retained_anchor_never_start_census(self):
+        anchor = {'pid': 5710, 'session': 0, 'startTicks': 6376, 'uid': 1001, 'executable': '/sdk/dotnet'}
+        with patch.object(Path, 'iterdir') as listing:
+            with self.assertRaises(RuntimeError):
+                custody.members(anchor, 'owned-lease', [anchor])
+            listing.assert_not_called()
+        with self.assertRaises(RuntimeError):
+            custody.validate_generation_metadata(anchor, 'retained-anchor')
+
+    def test_zero_session_recheck_changed_missing_and_invalid_remain_uncertain(self):
+        candidate = {'pid': 2, 'parentPid': 0, 'session': 0, 'startTicks': 33, 'uid': 0}
+        for recheck in (None, dict(candidate, pid=3), dict(candidate, session=1),
+                        dict(candidate, startTicks=34), dict(candidate, uid=1001),
+                        dict(candidate, session=-1), dict(candidate, startTicks=True)):
+            with self.subTest(recheck=recheck):
+                self.zero_session_candidate_controls(recheck=recheck)
+
+    def test_zero_session_unreadable_recheck_preserves_exact_primary(self):
+        primary = PermissionError(errno.EACCES, 'synthetic', '/proc/2/stat')
+        self.zero_session_candidate_controls(recheck=primary)
+
+    def test_candidate_zero_permission_keeps_all_session_type_and_range_guards(self):
+        candidate = {'pid': 2, 'session': 0, 'startTicks': 33, 'uid': 0}
+        custody.validate_generation_metadata(candidate, 'candidate', allow_zero_session=True)
+        for value in (-1, True, '0', None, 2147483648):
+            with self.subTest(value=value), self.assertRaises(RuntimeError):
+                custody.validate_generation_metadata(dict(candidate, session=value), 'candidate', allow_zero_session=True)
+        for field, value in (('pid', 0), ('pid', True), ('startTicks', -1), ('uid', -1)):
+            with self.subTest(field=field), self.assertRaises(RuntimeError):
+                custody.validate_generation_metadata(dict(candidate, **{field: value}), 'candidate', allow_zero_session=True)
+
+    def test_only_exact_true_flag_admits_zero_metadata_default_stays_positive(self):
+        candidate = {'pid': 2, 'session': 0, 'startTicks': 33, 'uid': 0}
+        with self.assertRaises(RuntimeError):
+            custody.validate_generation_metadata(candidate)
+        for flag in (False, 1, 'true', None):
+            with self.subTest(flag=flag), self.assertRaises(RuntimeError):
+                custody.validate_generation_metadata(candidate, allow_zero_session=flag)
+
     def test_census_invalid_metadata_has_constant_stage_field_reason_and_numeric_context(self):
         valid = {'pid': 18, 'session': 18, 'startTicks': 31, 'uid': 1001}
         for field, value, kind in (('session', 0, 'range'), ('uid', True, 'type'),
@@ -118,7 +194,7 @@ class CustodyControls(unittest.TestCase):
 
     def test_real_census_runtime_guard_preserves_primary_and_joins_child_without_cleanup_acceptance(self):
         anchor = {'pid': 17, 'session': 17, 'startTicks': 30, 'uid': 1001, 'executable': '/sdk/dotnet'}
-        candidate = {'pid': 18, 'session': 0, 'startTicks': 1, 'uid': 0}
+        candidate = {'pid': 18, 'session': 0, 'startTicks': 31, 'uid': 0}
         child = MagicMock(pid=17)
         child.poll.return_value = None
         def join(timeout=None):
@@ -268,7 +344,7 @@ class CustodyControls(unittest.TestCase):
     def test_invalid_candidate_numeric_fields_fail_before_foreign_getters(self):
         anchor = {'pid': 17, 'session': 17, 'startTicks': 30, 'uid': 1001, 'executable': '/sdk/dotnet'}
         valid = {'pid': 18, 'session': 18, 'startTicks': 29, 'uid': 1001}
-        for key, value in (('pid', True), ('session', 0), ('startTicks', True), ('startTicks', -1),
+        for key, value in (('pid', True), ('session', -1), ('startTicks', True), ('startTicks', -1),
                            ('startTicks', 9223372036854775808), ('startTicks', '29'), ('uid', -1), ('uid', 4294967296)):
             with self.subTest(key=key, value=value), patch.object(Path, 'iterdir', return_value=[Path('/proc/18')]), \
                     patch.object(custody, 'process_metadata', return_value=dict(valid, **{key: value})), \
