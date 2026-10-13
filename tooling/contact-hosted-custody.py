@@ -59,46 +59,116 @@ def physical_kib():
     return int(next(row for row in rows if row.startswith('MemAvailable:')).split()[1])
 
 
-def identity(pid):
+def process_metadata(pid):
     try:
         raw = Path(f'/proc/{pid}/stat').read_text()
         fields = raw[raw.rfind(')') + 2:].split()
         return {'pid': pid, 'session': int(fields[3]), 'startTicks': int(fields[19]),
-                'state': fields[0], 'executable': os.readlink(f'/proc/{pid}/exe')}
+                'state': fields[0], 'uid': Path(f'/proc/{pid}').stat().st_uid}
     except (FileNotFoundError, ProcessLookupError):
         return None
 
 
-def members(session, lease):
+def identity(pid):
+    row = process_metadata(pid)
+    if row is None:
+        return None
+    try:
+        return dict(row, executable=os.readlink(f'/proc/{pid}/exe'))
+    except (FileNotFoundError, ProcessLookupError):
+        return None
+
+
+def selected_identity(row):
+    actual = identity(row['pid'])
+    if actual is not None and any(actual[key] != row[key] for key in ('session', 'startTicks', 'uid')):
+        raise RuntimeError('Selected ownership changed before executable verification; preserve process')
+    return actual
+
+
+def same_generation(actual, original):
+    return actual is not None and all(actual[key] == original[key] for key in ('pid', 'session', 'startTicks', 'uid'))
+
+
+def live_original_leader(anchor):
+    # Probe only cheap metadata until the original leader generation is proved.
+    metadata = process_metadata(anchor['pid'])
+    if not same_generation(metadata, anchor):
+        return False
+    actual = selected_identity(metadata)
+    if not same_generation(actual, anchor):
+        return False
+    if actual['executable'] != anchor['executable']:
+        raise RuntimeError('Original leader executable changed; preserve uncertain owner')
+    return True
+
+
+def members(anchor, lease, retained):
     rows = []
     for path in Path('/proc').iterdir():
         if not path.name.isdigit():
             continue
         pid = int(path.name)
-        row = identity(pid)
+        row = process_metadata(pid)
         if row is None:
             continue
-        # POSIX sessions cannot be joined by an unrelated process. The retained
-        # Popen created this private session. Existing nested proof helpers may
-        # sanitize inherited environment, while owned setsid helpers retain the
-        # exact per-command nonce even when they create their own session.
-        if row['session'] == session:
-            rows.append(row)
+        known = next((old for old in retained if same_generation(row, old)), None)
+        if known is not None:
+            actual = selected_identity(row)
+            if actual is not None:
+                rows.append(actual)
             continue
-        try:
-            environment = Path(f'/proc/{pid}/environ').read_bytes().split(b'\0')
-        except (FileNotFoundError, PermissionError, ProcessLookupError):
-            continue
-        if ('CONTACT_HOSTED_RUN_LEASE=' + lease).encode() in environment:
-            rows.append(row)
+        # Sanitized nested proof children can lack the nonce. Admit them only
+        # while the original leader generation is live before and after selection.
+        if row['session'] == anchor['session'] and live_original_leader(anchor):
+            actual = selected_identity(row)
+            if actual is not None and live_original_leader(anchor):
+                rows.append(actual)
+                continue
+        if row['uid'] == os.getuid():
+            try:
+                environment = Path(f'/proc/{pid}/environ').read_bytes().split(b'\0')
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+            if ('CONTACT_HOSTED_RUN_LEASE=' + lease).encode() in environment:
+                actual = selected_identity(row)
+                if actual is not None:
+                    rows.append(actual)
+                continue
+        if row['session'] == anchor['session']:
+            current_leader = process_metadata(anchor['pid'])
+            replaced = current_leader is not None and current_leader['startTicks'] != anchor['startTicks']
+            if not (replaced and current_leader['session'] == anchor['session']):
+                raise RuntimeError('Original session generation unverified; preserve unmarked members')
+        # Unknown/foreign rows never gain ownership from a recycled numeric SID.
     return rows
+
+
+def known_alive(retained):
+    alive = []
+    failures = []
+    for row in retained:
+        try:
+            metadata = process_metadata(row['pid'])
+            if metadata is None or metadata['startTicks'] != row['startTicks']:
+                continue
+            if not same_generation(metadata, row):
+                raise RuntimeError('Known birth still present but membership changed; preserve uncertain owner')
+            actual = selected_identity(metadata)
+            if actual is not None:
+                if actual['executable'] != row['executable']:
+                    raise RuntimeError('Known executable changed; preserve owner')
+                alive.append(row)
+        except BaseException as failure:
+            failures.append(type(failure).__name__)
+    return alive, failures
 
 
 def signal_exact(row, number):
     observed = identity(row['pid'])
     if observed is None:
         return
-    if any(observed[key] != row[key] for key in ('session', 'startTicks', 'executable')):
+    if any(observed[key] != row[key] for key in ('session', 'startTicks', 'executable', 'uid')):
         raise RuntimeError('Process identity changed; preserve it')
     os.kill(row['pid'], number)
 
@@ -165,7 +235,7 @@ def execute(executable, arguments, phase, floor, environment):
         receipt['ownedProcesses'].append(actual)
         deadline = time.monotonic() + (600 if phase == 'full' else 300)
         while child.poll() is None:
-            for row in members(child.pid, lease):
+            for row in members(actual, lease, receipt['ownedProcesses']):
                 if not any(old['pid'] == row['pid'] and old['startTicks'] == row['startTicks'] for old in receipt['ownedProcesses']):
                     receipt['ownedProcesses'].append(row)
             if time.monotonic() >= deadline:
@@ -183,22 +253,65 @@ def execute(executable, arguments, phase, floor, environment):
             receipt['terminal'] = True
         if child is not None:
             receipt['terminal'] = False
+            census_failed = False
+            current = []
             try:
-                current = members(child.pid, lease)
-                for row in current:
-                    if not any(old['pid'] == row['pid'] and old['startTicks'] == row['startTicks'] for old in receipt['ownedProcesses']):
-                        receipt['ownedProcesses'].append(row)
+                current = members(receipt['ownedProcesses'][0], lease, receipt['ownedProcesses'])
+            except BaseException as census:
+                census_failed = True
+                receipt['cleanupFailures'].append(type(census).__name__)
+            for row in current:
+                if not any(old['pid'] == row['pid'] and old['startTicks'] == row['startTicks'] for old in receipt['ownedProcesses']):
+                    receipt['ownedProcesses'].append(row)
+            # Census failure does not discard retained, independently verified
+            # process identities. Settle each known owner; do not claim unknowns.
+            for row in receipt['ownedProcesses']:
+                try:
                     signal_exact(row, signal.SIGTERM)
+                except BaseException as cleanup:
+                    receipt['cleanupFailures'].append(type(cleanup).__name__)
+            try:
                 grace = time.monotonic() + 10
-                while members(child.pid, lease) and time.monotonic() < grace:
+                # One absolute grace deadline; census failure cannot skip it or
+                # renew it. Observe retained original identities independently.
+                while True:
                     child.poll()
+                    if not census_failed:
+                        try:
+                            for row in members(receipt['ownedProcesses'][0], lease, receipt['ownedProcesses']):
+                                if not any(old['pid'] == row['pid'] and old['startTicks'] == row['startTicks'] for old in receipt['ownedProcesses']):
+                                    receipt['ownedProcesses'].append(row)
+                                    signal_exact(row, signal.SIGTERM)
+                        except BaseException as census:
+                            census_failed = True
+                            receipt['cleanupFailures'].append(type(census).__name__)
+                    survivors, observation_failures = known_alive(receipt['ownedProcesses'])
+                    receipt['cleanupFailures'].extend(observation_failures)
+                    if not survivors or time.monotonic() >= grace:
+                        break
                     time.sleep(0.1)
-                for row in members(child.pid, lease):
+            except BaseException as census:
+                census_failed = True
+                receipt['cleanupFailures'].append(type(census).__name__)
+            survivors, observation_failures = known_alive(receipt['ownedProcesses'])
+            receipt['cleanupFailures'].extend(observation_failures)
+            for row in survivors:
+                try:
                     signal_exact(row, signal.SIGKILL)
+                except BaseException as cleanup:
+                    receipt['cleanupFailures'].append(type(cleanup).__name__)
+            # Joining the retained child is independent of census and signal failures.
+            try:
                 child.wait(timeout=5)
-                remaining = members(child.pid, lease)
+                receipt['retainedChildJoined'] = True
+            except BaseException as cleanup:
+                receipt['cleanupFailures'].append(type(cleanup).__name__)
+            try:
+                if census_failed:
+                    raise RuntimeError('Known child joined, complete census unverified; preserve unknown resources')
+                remaining = members(receipt['ownedProcesses'][0], lease, receipt['ownedProcesses'])
                 receipt['remainingOwnedProcesses'] = remaining
-                receipt['terminal'] = not remaining
+                receipt['terminal'] = receipt.get('retainedChildJoined', False) and not remaining
                 if remaining:
                     raise RuntimeError('Owned processes remain')
             except BaseException as cleanup:
