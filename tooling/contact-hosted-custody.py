@@ -130,6 +130,17 @@ def validate_generation_metadata(row, stage='candidate', allow_zero_session=Fals
                                        stage, 'metadata-invalid', key, invalid_kind, row)
 
 
+def confirmed_zombie(row):
+    # Terminal metadata excludes a process from a live census; it never grants
+    # ownership. Require two fresh matching birth/SID/UID/state observations.
+    for _ in range(2):
+        current = process_metadata(row['pid'])
+        validate_generation_metadata(current, 'candidate-recheck')
+        if not same_generation(current, row) or current.get('state') != 'Z':
+            return False
+    return True
+
+
 def members(anchor, lease, retained):
     # This fixed original allocation birth uses /proc/<pid>/stat starttime in
     # the controller/child's same live Linux boot and PID namespace.
@@ -165,6 +176,11 @@ def members(anchor, lease, retained):
                 raise census_runtime_error('Older candidate generation changed; preserve uncertainty',
                                            'candidate-recheck', 'generation-changed', metadata=rechecked)
             continue
+        if row['session'] > 0 and row.get('state') == 'Z':
+            if not confirmed_zombie(row):
+                raise census_runtime_error('Terminal candidate generation unverified; preserve uncertainty',
+                                           'candidate-recheck', 'zombie-unverified', metadata=row)
+            continue
         # Candidate SID zero is legal metadata, never SDK ownership evidence.
         # Keep positive sessions mandatory at every ownership selection below.
         # Sanitized nested proof children can lack the nonce. Admit them only
@@ -178,6 +194,19 @@ def members(anchor, lease, retained):
         if row['uid'] == os.getuid():
             try:
                 environment = Path(f'/proc/{pid}/environ').read_bytes().split(b'\0')
+            except PermissionError:
+                # A live candidate may become a zombie after the earlier stat.
+                # An unreadable live/changed/unverified generation stays fatal,
+                # retaining the original environment exception as the primary.
+                terminal = False
+                if row['session'] > 0:
+                    try:
+                        terminal = confirmed_zombie(row)
+                    except (OSError, RuntimeError, ValueError, IndexError):
+                        pass
+                if terminal:
+                    continue
+                raise
             except (FileNotFoundError, ProcessLookupError):
                 if row['session'] == 0:
                     raise
@@ -228,7 +257,7 @@ def census_guard_context(stage, reason, field=None, invalid_kind=None, metadata=
     stages = ('anchor', 'retained-anchor', 'candidate', 'candidate-recheck',
               'selected-generation', 'original-leader', 'session-generation')
     reasons = ('metadata-unavailable', 'metadata-invalid', 'anchor-session-mismatch',
-               'generation-changed', 'leader-executable-changed', 'session-unverified')
+               'generation-changed', 'leader-executable-changed', 'session-unverified', 'zombie-unverified')
     if type(stage) is not str or stage not in stages or type(reason) is not str or reason not in reasons:
         return None
     if field is not None and (type(field) is not str or field not in ('pid', 'session', 'startTicks', 'uid')):

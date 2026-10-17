@@ -51,6 +51,86 @@ class CustodyControls(unittest.TestCase):
             for probe in forbidden:
                 probe.assert_not_called()
 
+
+    def zombie_controls(self, initial_state='Z', observations=None, permission=False,
+                        expected_failure=False, uid=1001, sid=6259):
+        anchor = {'pid': 6259, 'session': 6259, 'startTicks': 8242,
+                  'uid': 1001, 'executable': '/sdk/dotnet'}
+        candidate = {'pid': 6630, 'parentPid': 6597, 'session': sid,
+                     'startTicks': 9341, 'uid': uid, 'state': initial_state}
+        zombie = dict(candidate, state='Z')
+        rechecks = [zombie, zombie] if observations is None else observations(candidate)
+        primary = PermissionError(errno.EACCES, 'synthetic', '/proc/6630/environ')
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(Path, 'iterdir', return_value=[Path('/proc/6630')]))
+            metadata = stack.enter_context(patch.object(custody, 'process_metadata',
+                                                       side_effect=[candidate, *rechecks]))
+            stack.enter_context(patch.object(custody.os, 'getuid', return_value=1001, create=True))
+            leader = stack.enter_context(patch.object(custody, 'live_original_leader', return_value=False))
+            environ = stack.enter_context(patch.object(Path, 'read_bytes', side_effect=primary))
+            forbidden = [stack.enter_context(patch.object(custody, name,
+                side_effect=AssertionError('Zombie must never grant ownership')))
+                for name in ('identity', 'selected_identity', 'signal_exact')]
+            forbidden.append(stack.enter_context(patch.object(custody.os, 'kill',
+                side_effect=AssertionError('Zombie must never be signaled'))))
+            if expected_failure:
+                expected_type = PermissionError if permission else RuntimeError
+                with self.assertRaises(expected_type) as result:
+                    custody.members(anchor, 'owned-lease', [anchor])
+                if permission:
+                    self.assertIs(primary, result.exception)
+            else:
+                self.assertEqual([], custody.members(anchor, 'owned-lease', [anchor]))
+                self.assertEqual([6630, 6630, 6630],
+                                 [call.args[0] for call in metadata.call_args_list])
+            if permission:
+                environ.assert_called_once_with()
+                leader.assert_called_once_with(anchor)
+            else:
+                environ.assert_not_called()
+                leader.assert_not_called()
+            for probe in forbidden:
+                probe.assert_not_called()
+
+    def test_actual_6630_zombie_requires_two_fresh_exact_generations_without_ownership(self):
+        self.zombie_controls()
+
+    def test_zombie_exclusion_does_not_depend_on_current_uid_or_numeric_session(self):
+        for uid, sid in ((0, 8000), (2001, 9000), (1001, 6259)):
+            with self.subTest(uid=uid, sid=sid):
+                self.zombie_controls(uid=uid, sid=sid)
+
+    def test_environ_permission_race_requires_two_fresh_exact_zombie_observations(self):
+        self.zombie_controls(initial_state='R', permission=True)
+
+    def test_zombie_recheck_changed_missing_live_or_invalid_is_never_excluded(self):
+        changes = [None, {'pid': 6631}, {'session': 6260}, {'startTicks': 9342},
+                   {'uid': 1002}, {'state': 'R'}, {'state': 'S'}, {'state': None},
+                   {'session': 0}, {'session': True}, {'startTicks': -1}, {'uid': True}]
+        for permission in (False, True):
+            for index in (0, 1):
+                for change in changes:
+                    with self.subTest(permission=permission, index=index, change=change):
+                        def observations(candidate, change=change, index=index):
+                            values = [dict(candidate, state='Z'), dict(candidate, state='Z')]
+                            values[index] = None if change is None else dict(values[index], **change)
+                            return values
+                        self.zombie_controls(initial_state='R' if permission else 'Z',
+                                             observations=observations, permission=permission,
+                                             expected_failure=True)
+
+    def test_live_unreadable_environ_preserves_the_exact_permission_primary(self):
+        self.zombie_controls(initial_state='R', permission=True,
+            observations=lambda candidate: [dict(candidate)], expected_failure=True)
+
+    def test_permission_recheck_errors_preserve_exact_environment_primary(self):
+        for failure in (PermissionError(errno.EACCES, 'synthetic', '/proc/6630/stat'),
+                        ProcessLookupError('synthetic'), RuntimeError('synthetic'),
+                        ValueError('synthetic stat field'), IndexError('synthetic stat shape')):
+            with self.subTest(failure=type(failure).__name__):
+                self.zombie_controls(initial_state='R', permission=True,
+                    observations=lambda candidate, failure=failure: [failure], expected_failure=True)
+
     def test_actual_newer_6884_zero_session_shape_is_rechecked_and_preserved(self):
         self.candidate_zero_controls({'pid': 6884, 'parentPid': 2, 'session': 0,
                                       'startTicks': 12241, 'uid': 0})
