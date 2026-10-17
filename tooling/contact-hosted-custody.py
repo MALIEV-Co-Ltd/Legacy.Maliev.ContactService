@@ -130,15 +130,33 @@ def validate_generation_metadata(row, stage='candidate', allow_zero_session=Fals
                                        stage, 'metadata-invalid', key, invalid_kind, row)
 
 
-def confirmed_zombie(row):
-    # Terminal metadata excludes a process from a live census; it never grants
-    # ownership. Require two fresh matching birth/SID/UID/state observations.
+def confirmed_unretained_absence(row, anchor, retained, missing):
+    # The caller supplies the first fresh fixed-procfs None observation.
+    # A second such observation excludes only this sampled unretained PID.
+    # It never establishes ownership, parent/child death, or future absence.
+    validate_generation_metadata(row, 'candidate', allow_zero_session=True)
+    if missing is not None or row['pid'] == anchor['pid'] or any(row['pid'] == old['pid'] for old in retained):
+        return False
+    try:
+        return process_metadata(row['pid']) is None
+    except InterruptedError:
+        raise
+    except (OSError, RuntimeError, ValueError, IndexError):
+        # Keep the caller's original unavailable-metadata guard or primary
+        # environment error. Unreadable and malformed probes are not absence.
+        return False
+
+
+def confirmed_unretained_terminal(row, anchor, retained):
+    # Keep confirmed absence distinct from two matching zombie observations.
     for _ in range(2):
         current = process_metadata(row['pid'])
+        if current is None and confirmed_unretained_absence(row, anchor, retained, current):
+            return 'absent'
         validate_generation_metadata(current, 'candidate-recheck')
         if not same_generation(current, row) or current.get('state') != 'Z':
-            return False
-    return True
+            return None
+    return 'zombie'
 
 
 def members(anchor, lease, retained):
@@ -171,13 +189,15 @@ def members(anchor, lease, retained):
         # Recheck cheap metadata before exclusion; a reuse race stays uncertain.
         if row['startTicks'] < anchor['startTicks']:
             rechecked = process_metadata(pid)
+            if rechecked is None and confirmed_unretained_absence(row, anchor, retained, rechecked):
+                continue
             validate_generation_metadata(rechecked, 'candidate-recheck', allow_zero_session=True)
             if not same_generation(rechecked, row):
                 raise census_runtime_error('Older candidate generation changed; preserve uncertainty',
                                            'candidate-recheck', 'generation-changed', metadata=rechecked)
             continue
         if row['session'] > 0 and row.get('state') == 'Z':
-            if not confirmed_zombie(row):
+            if confirmed_unretained_terminal(row, anchor, retained) not in ('zombie', 'absent'):
                 raise census_runtime_error('Terminal candidate generation unverified; preserve uncertainty',
                                            'candidate-recheck', 'zombie-unverified', metadata=row)
             continue
@@ -198,13 +218,15 @@ def members(anchor, lease, retained):
                 # A live candidate may become a zombie after the earlier stat.
                 # An unreadable live/changed/unverified generation stays fatal,
                 # retaining the original environment exception as the primary.
-                terminal = False
+                terminal = None
                 if row['session'] > 0:
                     try:
-                        terminal = confirmed_zombie(row)
+                        terminal = confirmed_unretained_terminal(row, anchor, retained)
+                    except InterruptedError:
+                        raise
                     except (OSError, RuntimeError, ValueError, IndexError):
                         pass
-                if terminal:
+                if terminal in ('zombie', 'absent'):
                     continue
                 raise
             except (FileNotFoundError, ProcessLookupError):
@@ -225,6 +247,8 @@ def members(anchor, lease, retained):
                                            'session-generation', 'session-unverified', metadata=row)
         if row['session'] == 0:
             rechecked = process_metadata(pid)
+            if rechecked is None and confirmed_unretained_absence(row, anchor, retained, rechecked):
+                continue
             validate_generation_metadata(rechecked, 'candidate-recheck', allow_zero_session=True)
             if not same_generation(rechecked, row):
                 raise census_runtime_error('Zero-session candidate generation changed; preserve uncertainty',
