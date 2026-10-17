@@ -12,8 +12,18 @@ import time
 import uuid
 
 SOLUTION = 'Legacy.Maliev.ContactService.slnx'
-FOCUS = 'FullyQualifiedName~ContactSourcePaginationCardinalityHttpTests|FullyQualifiedName~ContactFixtureLifecycleTests|FullyQualifiedName~WorkflowContractTests'
+FOCUS = 'FullyQualifiedName~ContactOriginalBody|FullyQualifiedName~ContactSourcePaginationCardinalityHttpTests|FullyQualifiedName~ContactFixtureLifecycleTests|FullyQualifiedName~WorkflowContractTests'
 SOURCE_PATHS = ('.github/workflows/_build-and-test.yml',
+                'Legacy.Maliev.ContactService.Api/Program.cs',
+                'Legacy.Maliev.ContactService.Api/Legacy.Maliev.ContactService.Api.csproj',
+                'Legacy.Maliev.ContactService.Api/Serialization/ContactOriginalBodyInputFormatter.cs',
+                'Legacy.Maliev.ContactService.Application/Models/UpsertContactRequestRequest.cs',
+                'Legacy.Maliev.ContactService.Tests/OriginalInput/ContactOriginalInputOracle.cs',
+                'Legacy.Maliev.ContactService.Tests/OriginalInput/ContactOriginalBodyNative.cs',
+                'Legacy.Maliev.ContactService.Tests/OriginalInput/ContactOriginalBodyReaderTests.cs',
+                'Legacy.Maliev.ContactService.Tests/OriginalInput/ContactOriginalBodyHttpTests.cs',
+                'Legacy.Maliev.ContactService.Tests/OriginalInput/ContactOriginalBodyBoundaryTests.cs',
+                'Legacy.Maliev.ContactService.Tests/OriginalInput/ContactOriginalBodyResourceTests.cs',
                 'Legacy.Maliev.ContactService.Tests/Controllers/ContactRuntimeParityBoundaryTests.cs',
                 'Legacy.Maliev.ContactService.Tests/Controllers/ContactFixtureLifecycle.cs',
                 'Legacy.Maliev.ContactService.Tests/Controllers/ContactFixtureLifecycleTests.cs',
