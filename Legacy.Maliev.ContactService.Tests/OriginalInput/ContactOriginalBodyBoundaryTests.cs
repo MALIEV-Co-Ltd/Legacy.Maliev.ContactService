@@ -208,8 +208,13 @@ public sealed class ContactOriginalBodyBoundaryTests(ContactRuntimePostgresFixtu
 
     private static Dictionary<string, string?> Payload() => new()
     {
-        ["FirstName"] = "Name", ["LastName"] = "Family", ["Company"] = "Company",
-        ["Email"] = "contact@example.invalid", ["Telephone"] = "123", ["Country"] = "TH", ["MessageContent"] = "message"
+        ["FirstName"] = "Name",
+        ["LastName"] = "Family",
+        ["Company"] = "Company",
+        ["Email"] = "contact@example.invalid",
+        ["Telephone"] = "123",
+        ["Country"] = "TH",
+        ["MessageContent"] = "message"
     };
 
     private static InputFormatterContext Context(Type type, IModelMetadataProvider metadata, string contentType = "application/json")
