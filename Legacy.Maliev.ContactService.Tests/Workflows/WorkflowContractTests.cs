@@ -10,7 +10,9 @@ public sealed class WorkflowContractTests
 {
     private const string BindingStep = "      - name: Bind existing validation to owned phase admission\n"
         + "        shell: bash\n"
-        + "        run: echo \"BASH_ENV=$GITHUB_WORKSPACE/tooling/contact-hosted-dotnet.sh\" >> \"$GITHUB_ENV\"\n";
+        + "        run: |\n"
+        + "          python3 -B tooling/test-contact-hosted-custody.py\n"
+        + "          echo \"BASH_ENV=$GITHUB_WORKSPACE/tooling/contact-hosted-dotnet.sh\" >> \"$GITHUB_ENV\"\n";
 
     [Theory]
     [InlineData("Bind existing validation to owned phase admission", "Bind unreviewed phase admission")]
@@ -256,7 +258,7 @@ internal static partial class WorkflowContractValidator
         }
         RequireScalarValue(binding, "name", "Bind existing validation to owned phase admission");
         RequireScalarValue(binding, "shell", "bash");
-        RequireScalarValue(binding, "run", "echo \"BASH_ENV=$GITHUB_WORKSPACE/tooling/contact-hosted-dotnet.sh\" >> \"$GITHUB_ENV\"");
+        RequireScalarValue(binding, "run", "python3 -B tooling/test-contact-hosted-custody.py\necho \"BASH_ENV=$GITHUB_WORKSPACE/tooling/contact-hosted-dotnet.sh\" >> \"$GITHUB_ENV\"\n");
 
         var scaffold = RequireMapping(steps.Children[5], "scaffold guard");
         if (scaffold.Children.Count != 3)

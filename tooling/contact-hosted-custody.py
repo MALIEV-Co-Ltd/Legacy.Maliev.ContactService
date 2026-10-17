@@ -12,8 +12,18 @@ import time
 import uuid
 
 SOLUTION = 'Legacy.Maliev.ContactService.slnx'
-FOCUS = 'FullyQualifiedName~ContactSourcePaginationCardinalityHttpTests|FullyQualifiedName~ContactFixtureLifecycleTests|FullyQualifiedName~WorkflowContractTests'
+FOCUS = 'FullyQualifiedName~ContactOriginalBody|FullyQualifiedName~ContactSourcePaginationCardinalityHttpTests|FullyQualifiedName~ContactFixtureLifecycleTests|FullyQualifiedName~WorkflowContractTests'
 SOURCE_PATHS = ('.github/workflows/_build-and-test.yml',
+                'Legacy.Maliev.ContactService.Api/Program.cs',
+                'Legacy.Maliev.ContactService.Api/Legacy.Maliev.ContactService.Api.csproj',
+                'Legacy.Maliev.ContactService.Api/Serialization/ContactOriginalBodyInputFormatter.cs',
+                'Legacy.Maliev.ContactService.Application/Models/UpsertContactRequestRequest.cs',
+                'Legacy.Maliev.ContactService.Tests/OriginalInput/ContactOriginalInputOracle.cs',
+                'Legacy.Maliev.ContactService.Tests/OriginalInput/ContactOriginalBodyNative.cs',
+                'Legacy.Maliev.ContactService.Tests/OriginalInput/ContactOriginalBodyReaderTests.cs',
+                'Legacy.Maliev.ContactService.Tests/OriginalInput/ContactOriginalBodyHttpTests.cs',
+                'Legacy.Maliev.ContactService.Tests/OriginalInput/ContactOriginalBodyBoundaryTests.cs',
+                'Legacy.Maliev.ContactService.Tests/OriginalInput/ContactOriginalBodyResourceTests.cs',
                 'Legacy.Maliev.ContactService.Tests/Controllers/ContactRuntimeParityBoundaryTests.cs',
                 'Legacy.Maliev.ContactService.Tests/Controllers/ContactFixtureLifecycle.cs',
                 'Legacy.Maliev.ContactService.Tests/Controllers/ContactFixtureLifecycleTests.cs',
@@ -120,6 +130,35 @@ def validate_generation_metadata(row, stage='candidate', allow_zero_session=Fals
                                        stage, 'metadata-invalid', key, invalid_kind, row)
 
 
+def confirmed_unretained_absence(row, anchor, retained, missing):
+    # The caller supplies the first fresh fixed-procfs None observation.
+    # A second such observation excludes only this sampled unretained PID.
+    # It never establishes ownership, parent/child death, or future absence.
+    validate_generation_metadata(row, 'candidate', allow_zero_session=True)
+    if missing is not None or row['pid'] == anchor['pid'] or any(row['pid'] == old['pid'] for old in retained):
+        return False
+    try:
+        return process_metadata(row['pid']) is None
+    except InterruptedError:
+        raise
+    except (OSError, RuntimeError, ValueError, IndexError):
+        # Keep the caller's original unavailable-metadata guard or primary
+        # environment error. Unreadable and malformed probes are not absence.
+        return False
+
+
+def confirmed_unretained_terminal(row, anchor, retained):
+    # Keep confirmed absence distinct from two matching zombie observations.
+    for _ in range(2):
+        current = process_metadata(row['pid'])
+        if current is None and confirmed_unretained_absence(row, anchor, retained, current):
+            return 'absent'
+        validate_generation_metadata(current, 'candidate-recheck')
+        if not same_generation(current, row) or current.get('state') != 'Z':
+            return None
+    return 'zombie'
+
+
 def members(anchor, lease, retained):
     # This fixed original allocation birth uses /proc/<pid>/stat starttime in
     # the controller/child's same live Linux boot and PID namespace.
@@ -150,10 +189,17 @@ def members(anchor, lease, retained):
         # Recheck cheap metadata before exclusion; a reuse race stays uncertain.
         if row['startTicks'] < anchor['startTicks']:
             rechecked = process_metadata(pid)
+            if rechecked is None and confirmed_unretained_absence(row, anchor, retained, rechecked):
+                continue
             validate_generation_metadata(rechecked, 'candidate-recheck', allow_zero_session=True)
             if not same_generation(rechecked, row):
                 raise census_runtime_error('Older candidate generation changed; preserve uncertainty',
                                            'candidate-recheck', 'generation-changed', metadata=rechecked)
+            continue
+        if row['session'] > 0 and row.get('state') == 'Z':
+            if confirmed_unretained_terminal(row, anchor, retained) not in ('zombie', 'absent'):
+                raise census_runtime_error('Terminal candidate generation unverified; preserve uncertainty',
+                                           'candidate-recheck', 'zombie-unverified', metadata=row)
             continue
         # Candidate SID zero is legal metadata, never SDK ownership evidence.
         # Keep positive sessions mandatory at every ownership selection below.
@@ -168,6 +214,21 @@ def members(anchor, lease, retained):
         if row['uid'] == os.getuid():
             try:
                 environment = Path(f'/proc/{pid}/environ').read_bytes().split(b'\0')
+            except PermissionError:
+                # A live candidate may become a zombie after the earlier stat.
+                # An unreadable live/changed/unverified generation stays fatal,
+                # retaining the original environment exception as the primary.
+                terminal = None
+                if row['session'] > 0:
+                    try:
+                        terminal = confirmed_unretained_terminal(row, anchor, retained)
+                    except InterruptedError:
+                        raise
+                    except (OSError, RuntimeError, ValueError, IndexError):
+                        pass
+                if terminal in ('zombie', 'absent'):
+                    continue
+                raise
             except (FileNotFoundError, ProcessLookupError):
                 if row['session'] == 0:
                     raise
@@ -186,6 +247,8 @@ def members(anchor, lease, retained):
                                            'session-generation', 'session-unverified', metadata=row)
         if row['session'] == 0:
             rechecked = process_metadata(pid)
+            if rechecked is None and confirmed_unretained_absence(row, anchor, retained, rechecked):
+                continue
             validate_generation_metadata(rechecked, 'candidate-recheck', allow_zero_session=True)
             if not same_generation(rechecked, row):
                 raise census_runtime_error('Zero-session candidate generation changed; preserve uncertainty',
@@ -218,7 +281,7 @@ def census_guard_context(stage, reason, field=None, invalid_kind=None, metadata=
     stages = ('anchor', 'retained-anchor', 'candidate', 'candidate-recheck',
               'selected-generation', 'original-leader', 'session-generation')
     reasons = ('metadata-unavailable', 'metadata-invalid', 'anchor-session-mismatch',
-               'generation-changed', 'leader-executable-changed', 'session-unverified')
+               'generation-changed', 'leader-executable-changed', 'session-unverified', 'zombie-unverified')
     if type(stage) is not str or stage not in stages or type(reason) is not str or reason not in reasons:
         return None
     if field is not None and (type(field) is not str or field not in ('pid', 'session', 'startTicks', 'uid')):

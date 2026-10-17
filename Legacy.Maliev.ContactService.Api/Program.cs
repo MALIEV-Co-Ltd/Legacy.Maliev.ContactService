@@ -1,5 +1,8 @@
 using System.Text.Json.Serialization;
 using Legacy.Maliev.ContactService.Api.Logging;
+using Legacy.Maliev.ContactService.Api.Serialization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Legacy.Maliev.ContactService.Application.Interfaces;
 using Legacy.Maliev.ContactService.Application.Services;
 using Legacy.Maliev.ContactService.Data;
@@ -40,6 +43,7 @@ static async Task RunHostAsync(string[] startupArgs)
 
     builder.Services.AddControllers().AddJsonOptions(options =>
         options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull);
+    builder.Services.AddSingleton<IConfigureOptions<MvcOptions>, ContactOriginalBodyMvcOptionsSetup>();
     builder.Services.AddSingleton(TimeProvider.System);
     builder.Services.AddScoped<IContactRequestRepository, ContactRequestRepository>();
     builder.Services.AddScoped<IContactRequestCache, DistributedContactRequestCache>();

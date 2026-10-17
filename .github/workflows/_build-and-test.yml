@@ -37,7 +37,9 @@ jobs:
           persist-credentials: false
       - name: Bind existing validation to owned phase admission
         shell: bash
-        run: echo "BASH_ENV=$GITHUB_WORKSPACE/tooling/contact-hosted-dotnet.sh" >> "$GITHUB_ENV"
+        run: |
+          python3 -B tooling/test-contact-hosted-custody.py
+          echo "BASH_ENV=$GITHUB_WORKSPACE/tooling/contact-hosted-dotnet.sh" >> "$GITHUB_ENV"
       - name: Validate .NET solution
         uses: MALIEV-Co-Ltd/Legacy.Maliev.Workflows/actions/dotnet-validate@e3a6093324a24968876782153286f52db8b29fd8
         with:
