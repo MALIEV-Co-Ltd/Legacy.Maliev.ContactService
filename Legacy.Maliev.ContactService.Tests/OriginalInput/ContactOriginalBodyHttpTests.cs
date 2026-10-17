@@ -276,7 +276,9 @@ public sealed class ContactOriginalBodyHttpTests(ContactRuntimePostgresFixture p
             Assert.True(id > 0);
             Assert.NotEqual(int.MaxValue, id);
             Assert.DoesNotContain(id, new[] { seeded.Selected.Id, seeded.Sibling.Id });
-            Assert.EndsWith("/Messages/" + id, response.Headers.Location!.ToString(), StringComparison.OrdinalIgnoreCase);
+            var location = Assert.IsType<Uri>(response.Headers.Location);
+            Assert.Equal("/Messages/" + id, location.AbsolutePath, ignoreCase: true);
+            Assert.Equal(lane == "versioned-create" ? "?version=1" : "", location.Query);
             AssertFields(body.RootElement, expected);
             Assert.Equal(ContactRuntimeFactory.InitialTime.UtcDateTime.AddMinutes(1), body.RootElement.GetProperty("createdDate").GetDateTime());
             Assert.Equal(ContactRuntimeFactory.InitialTime.UtcDateTime.AddMinutes(1), body.RootElement.GetProperty("modifiedDate").GetDateTime());
