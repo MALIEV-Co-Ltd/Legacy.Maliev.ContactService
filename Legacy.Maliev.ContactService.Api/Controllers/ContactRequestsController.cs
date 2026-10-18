@@ -37,7 +37,8 @@ public sealed class ContactRequestsController(IContactService contactService) : 
         CancellationToken cancellationToken)
     {
         var contactRequests = await contactService.GetPaginatedAsync(sort, search, index, size, cancellationToken);
-        if (contactRequests.Items.Count == 0)
+        if (contactRequests.Items.Count == 0
+            || size == 0 && !ControllerContext.RouteData.Values.ContainsKey("version"))
         {
             return NotFound();
         }
