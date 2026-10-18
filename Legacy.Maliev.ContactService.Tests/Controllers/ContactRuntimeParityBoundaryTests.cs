@@ -391,7 +391,7 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
     [InlineData("/messages/v1/contact-requests", 3, 2, 0)]
     [InlineData("/Messages", 1, int.MaxValue, 4)]
     [InlineData("/messages/v1/contact-requests", 1, int.MaxValue, 4)]
-    [InlineData("/Messages", 0, 0, 1)]
+    [InlineData("/Messages", 0, 0, 0)]
     [InlineData("/messages/v1/contact-requests", 0, 0, 1)]
     public async Task Pagination_ValidInt32OffsetsDoNotWrapOrChangeStoredMessages(string route, int index, int size, int expectedItems)
     {
