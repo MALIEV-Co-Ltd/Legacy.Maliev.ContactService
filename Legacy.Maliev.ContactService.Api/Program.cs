@@ -28,6 +28,7 @@ static async Task RunHostAsync(string[] startupArgs)
     var builder = WebApplication.CreateBuilder(startupArgs);
 
     builder.AddServiceDefaults();
+    builder.AddPrivateRequestObservation("messages");
     builder.Logging.AddContactPrivateDiagnostics();
     builder.AddDefaultApiVersioning();
     builder.AddPostgresDbContext<ContactRequestDbContext>(connectionName: "ContactRequestDbContext");

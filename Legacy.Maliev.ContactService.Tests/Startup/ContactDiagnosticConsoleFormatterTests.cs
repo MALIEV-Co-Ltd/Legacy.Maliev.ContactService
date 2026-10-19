@@ -298,7 +298,125 @@ public sealed class ContactDiagnosticConsoleFormatterTests
         Assert.False(failure.TryGetProperty("Path", out _));
     }
 
-    private sealed class ConsoleHostFactory(HostRetainedProvider retained, string sensitive)
+
+    [Fact]
+    public async Task ConfiguredContactHost_HealthIdentityAndSyntheticProbePreserveQuietPrivateSourceContract()
+    {
+        const string nonce = "0123456789abcdef0123456789abcdef";
+        var originalOut = Console.Out;
+        var originalError = Console.Error;
+        using var output = new StringWriter(CultureInfo.InvariantCulture);
+        using var synchronizedOutput = TextWriter.Synchronized(output);
+        var retained = new HostRetainedProvider();
+        Console.SetOut(synchronizedOutput);
+        Console.SetError(synchronizedOutput);
+        try
+        {
+            await using var factory = new ConsoleHostFactory(retained, "private@example.invalid", healthOnly: true);
+            using var client = factory.CreateClient();
+            var liveness = await SendObservationAsync(factory, "/messages/liveness");
+            Assert.Equal(200, liveness.Response.StatusCode);
+            var marker = liveness.Response.Headers["X-Maliev-Health-Instance"].ToString();
+            Assert.Matches("^[a-f0-9]{32}$", marker);
+            Assert.Equal("no-store", liveness.Response.Headers.CacheControl.ToString());
+            Assert.False(liveness.Response.Headers.ContainsKey("X-Maliev-Diagnostic-Id"));
+            var readiness = await SendObservationAsync(factory, "/messages/readiness");
+            Assert.Equal(200, readiness.Response.StatusCode);
+            Assert.Equal(marker, readiness.Response.Headers["X-Maliev-Health-Instance"].ToString());
+            Assert.Equal("no-store", readiness.Response.Headers.CacheControl.ToString());
+            var repeated = await SendObservationAsync(factory, "/messages/liveness");
+            Assert.Equal(marker, repeated.Response.Headers["X-Maliev-Health-Instance"].ToString());
+            Assert.Empty(retained.ObservationLevels);
+
+            await using var independent = new ConsoleHostFactory(new HostRetainedProvider(), "private@example.invalid", healthOnly: true);
+            using var independentClient = independent.CreateClient();
+            var other = await SendObservationAsync(independent, "/messages/liveness");
+            var otherMarker = other.Response.Headers["X-Maliev-Health-Instance"].ToString();
+            Assert.Matches("^[a-f0-9]{32}$", otherMarker);
+            Assert.NotEqual(marker, otherMarker);
+
+            var admitted = await SendObservationAsync(factory, "/internal/diagnostics/observability", nonce: nonce);
+            Assert.Equal(500, admitted.Response.StatusCode);
+            Assert.Equal(marker, admitted.Response.Headers["X-Maliev-Health-Instance"].ToString());
+            Assert.Equal(nonce, admitted.Response.Headers["X-Maliev-Diagnostic-Id"].ToString());
+            Assert.Equal("no-store", admitted.Response.Headers.CacheControl.ToString());
+            Assert.Equal("noindex", admitted.Response.Headers["X-Robots-Tag"].ToString());
+            var throttled = await SendObservationAsync(factory, "/internal/diagnostics/observability", nonce: nonce);
+            Assert.Equal(429, throttled.Response.StatusCode);
+            Assert.False(throttled.Response.Headers.ContainsKey("X-Maliev-Health-Instance"));
+            Assert.False(throttled.Response.Headers.ContainsKey("X-Maliev-Diagnostic-Id"));
+            Assert.Equal("no-store", throttled.Response.Headers.CacheControl.ToString());
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            Console.SetError(originalError);
+        }
+
+        var lines = output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Where(line => line.TrimStart().StartsWith('{')).ToArray();
+        Assert.Equal(3, lines.Length);
+        var events = lines.Select(line =>
+        {
+            using var document = JsonDocument.Parse(line);
+            return document.RootElement.Clone();
+        }).ToArray();
+        Assert.Equal(new[] { "CRITICAL", "ERROR", "WARNING" },
+            events.Select(value => value.GetProperty("severity").GetString()).OrderBy(value => value));
+        Assert.All(events, value =>
+        {
+            Assert.True(value.GetProperty("Synthetic").GetBoolean());
+            Assert.Equal(nonce, value.GetProperty("DiagnosticId").GetString());
+        });
+        Assert.DoesNotContain("private@example.invalid", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("/messages/liveness", "POST")]
+    [InlineData("/messages/readiness", "HEAD")]
+    [InlineData("/messages/aspire-liveness", "GET")]
+    [InlineData("/messages/private/readiness", "GET")]
+    [InlineData("/liveness", "GET")]
+    public async Task ConfiguredContactHost_OnlyRegisteredNativeGetHealthExposesIdentity(string path, string method)
+    {
+        await using var factory = new ConsoleHostFactory(new HostRetainedProvider(), "private@example.invalid", healthOnly: true);
+        using var client = factory.CreateClient();
+        var response = await SendObservationAsync(factory, path, method);
+        Assert.False(response.Response.Headers.ContainsKey("X-Maliev-Health-Instance"));
+        Assert.False(response.Response.Headers.ContainsKey("X-Maliev-Diagnostic-Id"));
+    }
+
+    [Theory]
+    [InlineData("GET", "203.0.113.8", "0123456789abcdef0123456789abcdef")]
+    [InlineData("POST", "127.0.0.1", "0123456789abcdef0123456789abcdef")]
+    [InlineData("GET", "127.0.0.1", "invalid")]
+    public async Task ConfiguredContactHost_UnadmittedSyntheticRequestRemainsPrivate(string method, string peer, string nonce)
+    {
+        var retained = new HostRetainedProvider();
+        await using var factory = new ConsoleHostFactory(retained, "private@example.invalid", healthOnly: true);
+        using var client = factory.CreateClient();
+        var response = await SendObservationAsync(factory, "/internal/diagnostics/observability", method, peer, nonce);
+        Assert.Equal(404, response.Response.StatusCode);
+        Assert.Equal("no-store", response.Response.Headers.CacheControl.ToString());
+        Assert.Equal("noindex", response.Response.Headers["X-Robots-Tag"].ToString());
+        Assert.False(response.Response.Headers.ContainsKey("X-Maliev-Health-Instance"));
+        Assert.False(response.Response.Headers.ContainsKey("X-Maliev-Diagnostic-Id"));
+        Assert.Empty(retained.ObservationLevels);
+    }
+
+    private static Task<Microsoft.AspNetCore.Http.HttpContext> SendObservationAsync(ConsoleHostFactory factory,
+        string path, string method = "GET", string peer = "127.0.0.1", string nonce = "0123456789abcdef0123456789abcdef")
+        => factory.Server.SendAsync(context =>
+        {
+            context.Request.Path = path;
+            context.Request.Method = method;
+            context.Request.Scheme = "https";
+            context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse(peer);
+            context.Request.Headers["X-Maliev-Diagnostic-Id"] = nonce;
+            context.Response.Headers.CacheControl = "public";
+        });
+
+    private sealed class ConsoleHostFactory(HostRetainedProvider retained, string sensitive, bool healthOnly = false)
         : Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program>
     {
         private readonly System.Security.Cryptography.RSA rsa = System.Security.Cryptography.RSA.Create(2048);
@@ -309,6 +427,8 @@ public sealed class ContactDiagnosticConsoleFormatterTests
             builder.ConfigureLogging(logging => logging.AddProvider(retained));
             builder.ConfigureTestServices(services =>
             {
+                if (healthOnly)
+                    services.Configure<Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckServiceOptions>(options => options.Registrations.Clear());
                 services.RemoveAll<Legacy.Maliev.ContactService.Application.Interfaces.IContactService>();
                 services.AddSingleton<Legacy.Maliev.ContactService.Application.Interfaces.IContactService>(new ConsoleFailureService(sensitive));
                 services.AddAuthentication("ConsoleProbe").AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, ConsoleProbeAuthentication>("ConsoleProbe", _ => { });
@@ -380,6 +500,7 @@ public sealed class ContactDiagnosticConsoleFormatterTests
     private sealed class HostRetainedProvider : ILoggerProvider
     {
         public System.Collections.Concurrent.ConcurrentQueue<LogLevel> ProbeLevels { get; } = new();
+        public System.Collections.Concurrent.ConcurrentQueue<LogLevel> ObservationLevels { get; } = new();
         public ILogger CreateLogger(string categoryName) => new HostRetainedLogger(this, categoryName);
         public void Dispose() { }
 
@@ -390,6 +511,8 @@ public sealed class ContactDiagnosticConsoleFormatterTests
             public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
             {
                 if (category == "Contact.ConsoleHostProbe") provider.ProbeLevels.Enqueue(logLevel);
+                if (category == "Maliev.Aspire.ServiceDefaults.Diagnostics.PrivateRequestObservation")
+                    provider.ObservationLevels.Enqueue(logLevel);
             }
         }
     }
