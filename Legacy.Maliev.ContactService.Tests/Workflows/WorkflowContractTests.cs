@@ -8,6 +8,53 @@ namespace Legacy.Maliev.ContactService.Tests.Workflows;
 
 public sealed class WorkflowContractTests
 {
+    private const string BindingStep = "      - name: Bind existing validation to owned phase admission\n"
+        + "        shell: bash\n"
+        + "        run: |\n"
+        + "          python3 -B tooling/test-contact-hosted-custody.py\n"
+        + "          echo \"BASH_ENV=$GITHUB_WORKSPACE/tooling/contact-hosted-dotnet.sh\" >> \"$GITHUB_ENV\"\n";
+
+    [Theory]
+    [InlineData("Bind existing validation to owned phase admission", "Bind unreviewed phase admission")]
+    [InlineData("shell: bash\n        run:", "shell: pwsh\n        run:")]
+    [InlineData("tooling/contact-hosted-dotnet.sh", "tooling/unreviewed-dotnet.sh")]
+    [InlineData(" >> \"$GITHUB_ENV\"", " >> \"$OTHER_ENV\"")]
+    [InlineData("timeout-minutes: 45", "timeout-minutes: 46")]
+    [InlineData("    timeout-minutes: 45\n", "")]
+    [InlineData("runs-on: ubuntu-latest", "runs-on: windows-latest")]
+    [InlineData("            focused-results\n", "")]
+    [InlineData("            focused-results\n", "            focused-results\n            ../unreviewed-results\n")]
+    [InlineData("if: always()", "if: success()")]
+    [InlineData("shell: bash\n        run:", "shell: bash\n        if: always()\n        run:")]
+    [InlineData("shell: bash\n        run:", "shell: bash\n        env:\n          BASH_ENV: unreviewed\n        run:")]
+    public void BuildAndTest_RejectsAlteredOwnedCustodyAndEvidenceBoundary(string original, string replacement)
+    {
+        AssertMutationRejected(original, replacement);
+    }
+
+    [Fact]
+    public void BuildAndTest_RejectsMissingOwnedCustodyBinding()
+    {
+        AssertMutationRejected(BindingStep, string.Empty);
+    }
+
+    [Fact]
+    public void BuildAndTest_RejectsDuplicateOwnedCustodyBinding()
+    {
+        AssertMutationRejected(BindingStep, BindingStep + BindingStep);
+    }
+
+    [Fact]
+    public void BuildAndTest_RejectsOwnedCustodyBindingAfterValidation()
+    {
+        const string scaffold = "      - name: Validate safe scaffold orchestration";
+        Assert.Contains(BindingStep, Workflow, StringComparison.Ordinal);
+        Assert.Contains(scaffold, Workflow, StringComparison.Ordinal);
+        var withoutBinding = Workflow.Replace(BindingStep, string.Empty, StringComparison.Ordinal);
+        var moved = withoutBinding.Replace(scaffold, BindingStep + scaffold, StringComparison.Ordinal);
+        Assert.Throws<InvalidOperationException>(() => WorkflowContractValidator.Validate(moved));
+    }
+
     private static readonly string Workflow = File.ReadAllText(FindRepositoryFile(".github", "workflows", "_build-and-test.yml"));
     private static readonly string ApiProject = File.ReadAllText(
         FindRepositoryFile("Legacy.Maliev.ContactService.Api", "Legacy.Maliev.ContactService.Api.csproj"));
@@ -183,12 +230,14 @@ internal static partial class WorkflowContractValidator
         }
 
         RequireScalarValue(validateJob, "name", "validate");
+        RequireScalarValue(validateJob, "runs-on", "ubuntu-latest");
+        RequireScalarValue(validateJob, "timeout-minutes", "45");
         RejectDuplicatedValidationActionsAndCommands(jobs);
 
         var steps = RequireSequence(validateJob, "steps");
-        if (steps.Children.Count != 7)
+        if (steps.Children.Count != 8)
         {
-            throw new InvalidOperationException("Validate job must contain four validation, one scaffold guard, and two evidence steps.");
+            throw new InvalidOperationException("Validate job must contain four validation, one owned custody binding, one scaffold guard, and two evidence steps.");
         }
 
         var environment = RequireMapping(validateJob, "env");
@@ -202,7 +251,16 @@ internal static partial class WorkflowContractValidator
         RequireScalarValue(environment, "VSTestLogger", "trx");
         RequireScalarValue(environment, "VSTestResultsDirectory", "${{ github.workspace }}/runner-results");
 
-        var scaffold = RequireMapping(steps.Children[4], "scaffold guard");
+        var binding = RequireMapping(steps.Children[3], "owned custody binding");
+        if (binding.Children.Count != 3)
+        {
+            throw new InvalidOperationException("Owned custody binding must contain only name, shell, and run.");
+        }
+        RequireScalarValue(binding, "name", "Bind existing validation to owned phase admission");
+        RequireScalarValue(binding, "shell", "bash");
+        RequireScalarValue(binding, "run", "python3 -B tooling/test-contact-hosted-custody.py\necho \"BASH_ENV=$GITHUB_WORKSPACE/tooling/contact-hosted-dotnet.sh\" >> \"$GITHUB_ENV\"\n");
+
+        var scaffold = RequireMapping(steps.Children[5], "scaffold guard");
         if (scaffold.Children.Count != 3)
         {
             throw new InvalidOperationException("Scaffold guard must contain only name, shell, and run.");
@@ -211,7 +269,7 @@ internal static partial class WorkflowContractValidator
         RequireScalarValue(scaffold, "name", "Validate safe scaffold orchestration");
         RequireScalarValue(scaffold, "shell", "pwsh");
         RequireScalarValue(scaffold, "run", "./tooling/Test-ContactScaffoldContract.ps1 -EvidencePath ./runner-results/contact-scaffold-orchestration.json");
-        var gate = RequireMapping(steps.Children[5], "coverage gate");
+        var gate = RequireMapping(steps.Children[6], "coverage gate");
         if (gate.Children.Count != 2)
         {
             throw new InvalidOperationException("Coverage gate must contain only name and run.");
@@ -219,7 +277,7 @@ internal static partial class WorkflowContractValidator
 
         RequireScalarValue(gate, "name", "Gate owned production coverage");
         RequireScalarValue(gate, "run", "python3 scripts/verify-runner-coverage.py runner-results");
-        var evidence = RequireMapping(steps.Children[6], "evidence upload");
+        var evidence = RequireMapping(steps.Children[7], "evidence upload");
         if (evidence.Children.Count != 4)
         {
             throw new InvalidOperationException("Evidence upload must contain exactly name, if, uses and with.");
@@ -235,7 +293,7 @@ internal static partial class WorkflowContractValidator
         }
 
         RequireScalarValue(evidenceInputs, "name", "contact-validation-${{ github.sha }}");
-        RequireScalarValue(evidenceInputs, "path", "runner-results");
+        RequireScalarValue(evidenceInputs, "path", "runner-results\nfocused-results\n");
         RequireScalarValue(evidenceInputs, "if-no-files-found", "warn");
         RequireScalarValue(evidenceInputs, "retention-days", "7");
 
@@ -267,7 +325,7 @@ internal static partial class WorkflowContractValidator
                 ["persist-credentials"] = "false",
             });
         ValidateStep(
-            steps.Children[3],
+            steps.Children[4],
             SharedValidationAction,
             new Dictionary<string, string>(StringComparer.Ordinal)
             {

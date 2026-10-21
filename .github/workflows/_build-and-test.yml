@@ -10,6 +10,7 @@ jobs:
   validate:
     name: validate
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       MalievWorkspaceRoot: ${{ github.workspace }}/.dependencies
       VSTestCollect: XPlat Code Coverage
@@ -34,6 +35,11 @@ jobs:
           ref: 78e48ffc4ee000df0510cba5e7c7a3c4c4d539d7
           path: .dependencies/Legacy.Maliev.CompatibilityContracts
           persist-credentials: false
+      - name: Bind existing validation to owned phase admission
+        shell: bash
+        run: |
+          python3 -B tooling/test-contact-hosted-custody.py
+          echo "BASH_ENV=$GITHUB_WORKSPACE/tooling/contact-hosted-dotnet.sh" >> "$GITHUB_ENV"
       - name: Validate .NET solution
         uses: MALIEV-Co-Ltd/Legacy.Maliev.Workflows/actions/dotnet-validate@e3a6093324a24968876782153286f52db8b29fd8
         with:
@@ -49,6 +55,8 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: contact-validation-${{ github.sha }}
-          path: runner-results
+          path: |
+            runner-results
+            focused-results
           if-no-files-found: warn
           retention-days: 7

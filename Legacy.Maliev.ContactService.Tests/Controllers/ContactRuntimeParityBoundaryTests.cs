@@ -242,6 +242,208 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         Assert.Equal("OnlyExcludedMarker", (await db.Messages.AsNoTracking().SingleAsync()).Country);
     }
 
+    [Theory]
+    [InlineData("/Messages")]
+    [InlineData("/messages/v1/contact-requests")]
+    public async Task SourceNullPost_JsonNullReturnsBadRequestWithoutChangingStoredMessages(string route)
+    {
+        await postgres.ResetAsync();
+        await using var db = postgres.CreateContext();
+        db.Messages.AddRange(new ContactRequest { Id = 500, FirstName = "Synthetic survivor" },
+            new ContactRequest { Id = 800, MessageContent = "Synthetic unrelated" });
+        await db.SaveChangesAsync();
+        var before = await SnapshotSourceRowsWithVersionAsync(db);
+        await using var factory = new ContactRuntimeFactory(postgres.ConnectionString);
+        using var client = factory.AuthenticatedClient();
+        using var body = new StringContent("null", Encoding.UTF8, "application/json");
+        using var response = await client.PostAsync(route, body);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await using var fresh = postgres.CreateContext();
+        Assert.Equal(before, await SnapshotSourceRowsWithVersionAsync(fresh));
+    }
+
+    [Theory]
+    [InlineData("/Messages", true)]
+    [InlineData("/Messages", false)]
+    [InlineData("/messages/v1/contact-requests", true)]
+    [InlineData("/messages/v1/contact-requests", false)]
+    public async Task SourceNullPut_JsonNullReturnsBadRequestWithoutChangingStoredMessages(string route, bool targetExists)
+    {
+        await postgres.ResetAsync();
+        await using var db = postgres.CreateContext();
+        db.Messages.AddRange(new ContactRequest { Id = 500, FirstName = "Synthetic selected", MessageContent = "Retained selected" },
+            new ContactRequest { Id = 800, FirstName = "Synthetic survivor", MessageContent = "Retained unrelated" });
+        await db.SaveChangesAsync();
+        var before = await SnapshotSourceRowsWithVersionAsync(db);
+        await using var factory = new ContactRuntimeFactory(postgres.ConnectionString);
+        using var client = factory.AuthenticatedClient();
+        using var body = new StringContent("null", Encoding.UTF8, "application/json");
+        using var response = await client.PutAsync(route + (targetExists ? "/500" : "/999"), body);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await using var fresh = postgres.CreateContext();
+        Assert.Equal(before, await SnapshotSourceRowsWithVersionAsync(fresh));
+    }
+
+    [Theory]
+    [InlineData("/Messages", "company")]
+    [InlineData("/Messages", "email")]
+    [InlineData("/Messages", "firstName")]
+    [InlineData("/Messages", "lastName")]
+    [InlineData("/Messages", "messageContent")]
+    [InlineData("/Messages", "telephone")]
+    [InlineData("/messages/v1/contact-requests", "company")]
+    [InlineData("/messages/v1/contact-requests", "email")]
+    [InlineData("/messages/v1/contact-requests", "firstName")]
+    [InlineData("/messages/v1/contact-requests", "lastName")]
+    [InlineData("/messages/v1/contact-requests", "messageContent")]
+    [InlineData("/messages/v1/contact-requests", "telephone")]
+    public async Task SourceSearch_MixedTwentyMatchesAndEightyOneDistractorsPreserveExactCardinality(string route, string field)
+    {
+        await postgres.ResetAsync();
+        await using var db = postgres.CreateContext();
+        for (var i = 0; i < 20; i++)
+        {
+            var matched = new ContactRequest { Id = 500 + i };
+            SetSourceSearchField(matched, field, "HelloWorld");
+            db.Messages.Add(matched);
+        }
+
+        for (var i = 0; i <= 80; i++)
+        {
+            var unrelated = new ContactRequest { Id = 800 + i };
+            SetSourceSearchField(unrelated, field, "Something else");
+            db.Messages.Add(unrelated);
+        }
+
+        await db.SaveChangesAsync();
+        Assert.Equal(101, await db.Messages.CountAsync());
+        var before = await SnapshotSourceRowsWithVersionAsync(db);
+        await using var factory = new ContactRuntimeFactory(postgres.ConnectionString);
+        using var client = factory.AuthenticatedClient();
+        using var response = await client.GetAsync(route + "?search=hello");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var items = json.RootElement.GetProperty("items").EnumerateArray().ToArray();
+        Assert.Equal(20, items.Length);
+        Assert.Equal(20, json.RootElement.GetProperty("totalRecords").GetInt32());
+        Assert.False(json.RootElement.TryGetProperty("totalItems", out _));
+        Assert.Equal(1, json.RootElement.GetProperty("pageIndex").GetInt32());
+        Assert.Equal(1, json.RootElement.GetProperty("totalPages").GetInt32());
+        Assert.False(json.RootElement.GetProperty("hasPreviousPage").GetBoolean());
+        Assert.False(json.RootElement.GetProperty("hasNextPage").GetBoolean());
+        Assert.Equal(Enumerable.Range(500, 20).ToArray(), items.Select(item => item.GetProperty("id").GetInt32()).ToArray());
+        Assert.All(items, item => Assert.Equal("HelloWorld", item.GetProperty(field).GetString()));
+        await using var fresh = postgres.CreateContext();
+        Assert.Equal(before, await SnapshotSourceRowsWithVersionAsync(fresh));
+    }
+
+    [Theory]
+    [InlineData("/Messages")]
+    [InlineData("/messages/v1/contact-requests")]
+    public async Task SourceSearch_UniqueIdSubstringFixtureReturnsExactlySelectedMessage(string route)
+    {
+        await postgres.ResetAsync();
+        await using var db = postgres.CreateContext();
+        db.Messages.AddRange(Enumerable.Range(500, 20).Concat(Enumerable.Range(800, 81))
+            .Select(id => new ContactRequest { Id = id }));
+        await db.SaveChangesAsync();
+        Assert.Equal(101, await db.Messages.CountAsync());
+        var before = await SnapshotSourceRowsWithVersionAsync(db);
+        await using var factory = new ContactRuntimeFactory(postgres.ConnectionString);
+        using var client = factory.AuthenticatedClient();
+        using var response = await client.GetAsync(route + "?search=512");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(1, json.RootElement.GetProperty("totalRecords").GetInt32());
+        var selected = Assert.Single(json.RootElement.GetProperty("items").EnumerateArray());
+        Assert.Equal(512, selected.GetProperty("id").GetInt32());
+        await using var fresh = postgres.CreateContext();
+        Assert.Equal(before, await SnapshotSourceRowsWithVersionAsync(fresh));
+    }
+
+    private static async Task<string> SnapshotSourceRowsWithVersionAsync(ContactRequestDbContext db)
+    {
+        var rows = await db.Messages.AsNoTracking().OrderBy(message => message.Id).Select(message => new
+        {
+            message.Id,
+            message.FirstName,
+            message.LastName,
+            message.Company,
+            message.Email,
+            message.Telephone,
+            message.Country,
+            message.MessageContent,
+            message.CreatedDate,
+            message.ModifiedDate,
+            Version = EF.Property<uint>(message, "Version")
+        }).ToArrayAsync();
+        return JsonSerializer.Serialize(rows);
+    }
+
+    [Theory]
+    [InlineData("/Messages", 1073741825, 4, 0)]
+    [InlineData("/Messages", 1431655767, 3, 0)]
+    [InlineData("/Messages", int.MaxValue, 4, 0)]
+    [InlineData("/messages/v1/contact-requests", 1073741825, 4, 0)]
+    [InlineData("/messages/v1/contact-requests", 1431655767, 3, 0)]
+    [InlineData("/messages/v1/contact-requests", int.MaxValue, 4, 0)]
+    [InlineData("/Messages", 3, 2, 0)]
+    [InlineData("/messages/v1/contact-requests", 3, 2, 0)]
+    [InlineData("/Messages", 1, int.MaxValue, 4)]
+    [InlineData("/messages/v1/contact-requests", 1, int.MaxValue, 4)]
+    [InlineData("/Messages", 0, 0, 0)]
+    [InlineData("/messages/v1/contact-requests", 0, 0, 1)]
+    public async Task Pagination_ValidInt32OffsetsDoNotWrapOrChangeStoredMessages(string route, int index, int size, int expectedItems)
+    {
+        await postgres.ResetAsync();
+        using var expiry = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        await using (var seed = postgres.CreateContext())
+        {
+            seed.Messages.AddRange(Enumerable.Range(501, 4).Select(id => new ContactRequest
+            {
+                Id = id,
+                FirstName = "Synthetic first " + id,
+                LastName = "Synthetic last " + id,
+                Company = "Synthetic company " + id,
+                Email = "synthetic" + id + "@example.test",
+                Telephone = "Synthetic phone " + id,
+                Country = "Synthetic country " + id,
+                MessageContent = "Synthetic retained message " + id,
+                CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Unspecified),
+                ModifiedDate = new DateTime(2026, 10, 2, 0, 0, 0, DateTimeKind.Unspecified)
+            }));
+            await seed.SaveChangesAsync(expiry.Token);
+        }
+
+        string before;
+        await using (var snapshot = postgres.CreateContext())
+        {
+            before = await SnapshotSourceRowsWithVersionAsync(snapshot);
+        }
+
+        await using var factory = new ContactRuntimeFactory(postgres.ConnectionString);
+        using var client = factory.AuthenticatedClient();
+        using var response = await client.GetAsync(route + "?index=" + index + "&size=" + size, expiry.Token);
+        Assert.Equal(expectedItems == 0 ? HttpStatusCode.NotFound : HttpStatusCode.OK, response.StatusCode);
+        if (expectedItems != 0)
+        {
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(expiry.Token));
+            var page = json.RootElement;
+            Assert.Equal(new[] { "hasNextPage", "hasPreviousPage", "items", "pageIndex", "totalPages", "totalRecords" },
+                page.EnumerateObject().Select(property => property.Name).OrderBy(name => name, StringComparer.Ordinal).ToArray());
+            Assert.Equal(Enumerable.Range(501, expectedItems).ToArray(),
+                page.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("id").GetInt32()).ToArray());
+            Assert.Equal(4, page.GetProperty("totalRecords").GetInt32());
+            Assert.Equal(1, page.GetProperty("pageIndex").GetInt32());
+            Assert.Equal(expectedItems == 1 ? 4 : 1, page.GetProperty("totalPages").GetInt32());
+            Assert.False(page.GetProperty("hasPreviousPage").GetBoolean());
+            Assert.Equal(expectedItems == 1, page.GetProperty("hasNextPage").GetBoolean());
+        }
+
+        await using var fresh = postgres.CreateContext();
+        Assert.Equal(before, await SnapshotSourceRowsWithVersionAsync(fresh));
+    }
+
     private static void SetSourceSearchField(ContactRequest message, string field, string value)
     {
         switch (field)
@@ -630,25 +832,118 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
 
 public sealed class ContactRuntimePostgresFixture : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer container = new PostgreSqlBuilder("postgres:18-alpine").Build();
+    private readonly string lease = Guid.NewGuid().ToString("N");
+    private readonly PostgreSqlContainer container;
+    private readonly ContactFixtureLifecycle lifecycle;
+    private readonly ContactFixtureReceiptIdentity receiptIdentity = new();
+
+    public ContactRuntimePostgresFixture()
+    {
+        container = new PostgreSqlBuilder("postgres:18-alpine")
+            .WithLabel("codex.contact.run", Environment.GetEnvironmentVariable("CONTACT_HOSTED_RUN_LEASE") ?? lease)
+            .WithLabel("codex.contact.fixture", lease)
+            .WithCreateParameterModifier(parameters =>
+            {
+                parameters.HostConfig.Memory = 536870912;
+                parameters.HostConfig.NanoCPUs = 1000000000;
+                parameters.HostConfig.Tmpfs = new Dictionary<string, string>
+                {
+                    ["/var/lib/postgresql"] = "rw,size=134217728",
+                };
+            }).Build();
+        lifecycle = new ContactFixtureLifecycle(
+            async token =>
+            {
+                ObserveAdmission("container-start");
+                await container.StartAsync(token);
+                receiptIdentity.Capture(container.Id);
+                Observe("container-start-settled", null);
+            },
+            async token =>
+            {
+                ObserveAdmission("migration");
+                await using var db = CreateContext();
+                await db.Database.MigrateAsync(token);
+                Observe("migration-settled", null);
+            },
+            async () =>
+            {
+                await container.DisposeAsync();
+                Observe("container-dispose-settled", null);
+            }, Observe);
+    }
+
     public string ConnectionString => container.GetConnectionString();
     public ContactRequestDbContext CreateContext() => new(new DbContextOptionsBuilder<ContactRequestDbContext>()
         .UseNpgsql(ConnectionString).Options);
 
     public async Task InitializeAsync()
     {
-        await container.StartAsync();
-        await using var db = CreateContext();
-        await db.Database.MigrateAsync();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+        await lifecycle.InitializeAsync(deadline.Token);
     }
 
     public async Task ResetAsync()
     {
+        ObserveAdmission("reset");
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using var db = CreateContext();
-        await db.Messages.ExecuteDeleteAsync();
+        await db.Messages.ExecuteDeleteAsync(deadline.Token);
     }
 
-    public Task DisposeAsync() => container.DisposeAsync().AsTask();
+    public Task DisposeAsync() => lifecycle.DisposeAsync();
+
+    private void ObserveAdmission(string phase)
+    {
+        var memory = File.ReadLines("/proc/meminfo").Single(line => line.StartsWith("MemAvailable:", StringComparison.Ordinal));
+        var availableKiB = long.Parse(memory.Split(' ', StringSplitOptions.RemoveEmptyEntries)[1], System.Globalization.CultureInfo.InvariantCulture);
+        ObserveRecord(phase + "-admission", null, availableKiB);
+        if (availableKiB < 4194304)
+        {
+            throw new InvalidOperationException("Contact container phase memory admission failed; setup failure, not behavioral RED.");
+        }
+    }
+
+    private void Observe(string phase, Exception? failure) => ObserveRecord(phase, failure, null);
+
+    private void ObserveRecord(string phase, Exception? failure, long? availableKiB)
+    {
+        var directory = Environment.GetEnvironmentVariable("CONTACT_FIXTURE_CUSTODY_DIRECTORY");
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return;
+        }
+        Directory.CreateDirectory(directory);
+        File.AppendAllText(Path.Combine(directory, lease + ".jsonl"), JsonSerializer.Serialize(new
+        {
+            lease,
+            runLease = Environment.GetEnvironmentVariable("CONTACT_HOSTED_RUN_LEASE"),
+            observedUtc = DateTime.UtcNow,
+            phase,
+            availableKiB,
+            testedCommit = Environment.GetEnvironmentVariable("GITHUB_SHA"),
+            containerId = phase == "container-start-settled" || phase == "container-dispose-settled" ? receiptIdentity.ContainerId : null,
+            exceptionType = failure?.GetType().FullName,
+        }) + Environment.NewLine);
+    }
+}
+
+/// <summary>Retains the actual started resource identity without querying it after disposal.</summary>
+internal sealed class ContactFixtureReceiptIdentity
+{
+    private string? containerId;
+
+    public string? ContainerId => Volatile.Read(ref containerId);
+
+    public void Capture(string actualContainerId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(actualContainerId);
+        var previous = Interlocked.CompareExchange(ref containerId, actualContainerId, null);
+        if (previous is not null && !string.Equals(previous, actualContainerId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Contact fixture receipt identity changed; preserve uncertainty.");
+        }
+    }
 }
 
 internal sealed class ContactRuntimeFactory(
