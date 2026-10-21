@@ -53,6 +53,77 @@ public sealed class ContactSourcePaginationCardinalityHttpTests(ContactRuntimePo
         Assert.Equal(before, JsonSerializer.Serialize(await after.Messages.AsNoTracking().OrderBy(row => row.Id).ToArrayAsync()));
     }
 
+    [Theory]
+    [InlineData("/Messages")]
+    [InlineData("/messages/v1/contact-requests")]
+    public async Task OriginalThousandExplicitIds_DescendingHttpPreservesExactEndpointsAndRows(string route)
+    {
+        await postgres.ResetAsync();
+        await using (var db = postgres.CreateContext())
+        {
+            db.Messages.AddRange(Enumerable.Range(1, 1000).Select(id => new ContactRequest { Id = id }));
+            await db.SaveChangesAsync();
+        }
+        string before;
+        await using (var db = postgres.CreateContext())
+        {
+            Assert.Equal(Enumerable.Range(1, 1000).ToArray(),
+                await db.Messages.AsNoTracking().OrderBy(row => row.Id).Select(row => row.Id).ToArrayAsync());
+            before = await SnapshotDescendingSourceRowsAsync(db);
+        }
+        await using var factory = new ContactRuntimeFactory(postgres.ConnectionString);
+        using var client = factory.AuthenticatedClient();
+        using (var response = await client.GetAsync(route + "?sort=MessageId_Descending&search="))
+        {
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var page = json.RootElement;
+            var ids = page.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("id").GetInt32()).ToArray();
+            Assert.Equal(1000, ids.Length);
+            Assert.Equal(1000, ids[0]);
+            Assert.Equal(1, ids[^1]);
+            Assert.Equal(Enumerable.Range(1, 1000).Reverse().ToArray(), ids);
+            Assert.Equal(1000, page.GetProperty("totalRecords").GetInt32());
+            Assert.False(page.TryGetProperty("totalItems", out _));
+            Assert.Equal(1, page.GetProperty("pageIndex").GetInt32());
+            Assert.Equal(1, page.GetProperty("totalPages").GetInt32());
+            Assert.False(page.GetProperty("hasPreviousPage").GetBoolean());
+            Assert.False(page.GetProperty("hasNextPage").GetBoolean());
+        }
+        for (var page = 1; page <= 10; page++)
+        {
+            await AssertPageAsync(client, $"{route}?sort=MessageId_Descending&index={page}&size=100",
+                Enumerable.Range(1, 1000).Reverse().Skip((page - 1) * 100).Take(100).ToArray(),
+                page, 10, page > 1, page < 10);
+        }
+        using (var beyond = await client.GetAsync(route + "?sort=MessageId_Descending&index=11&size=100"))
+        {
+            Assert.Equal(HttpStatusCode.NotFound, beyond.StatusCode);
+        }
+        await using var fresh = postgres.CreateContext();
+        Assert.Equal(before, await SnapshotDescendingSourceRowsAsync(fresh));
+    }
+
+    private static async Task<string> SnapshotDescendingSourceRowsAsync(Legacy.Maliev.ContactService.Data.ContactRequestDbContext db)
+    {
+        var rows = await db.Messages.AsNoTracking().OrderBy(row => row.Id).Select(row => new
+        {
+            row.Id,
+            row.FirstName,
+            row.LastName,
+            row.Company,
+            row.Email,
+            row.Telephone,
+            row.Country,
+            row.MessageContent,
+            row.CreatedDate,
+            row.ModifiedDate,
+            Version = EF.Property<uint>(row, "Version")
+        }).ToArrayAsync();
+        return JsonSerializer.Serialize(rows);
+    }
+
+
     private static async Task AssertPageAsync(HttpClient client, string path, int[] ids,
         int index, int totalPages, bool previous, bool next)
     {

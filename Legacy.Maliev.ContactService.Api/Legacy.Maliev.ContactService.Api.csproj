@@ -30,6 +30,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.NewtonsoftJson" Version="10.0.12" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" Condition="'$(EnableContactScaffoldDesignTime)' != 'true'" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" Condition="'$(EnableContactScaffoldDesignTime)' == 'true'" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12" Condition="'$(EnableContactScaffoldDesignTime)' == 'true'">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
