@@ -5,6 +5,7 @@ using Moq;
 
 namespace Legacy.Maliev.ContactService.Tests.Data;
 
+/// <summary>Checks that distributed contact cache reads, writes, and invalidation propagate cancellation exceptions.</summary>
 public sealed class DistributedContactRequestCacheTests
 {
     private static readonly ContactRequestResponse Request = new(
@@ -19,6 +20,8 @@ public sealed class DistributedContactRequestCacheTests
         DateTime.UtcNow,
         null);
 
+    /// <summary>Checks that cancellation from the distributed cache read reaches the contact cache caller.</summary>
+    /// <returns>A task that completes after asserting propagation of OperationCanceledException from the cache read.</returns>
     [Fact]
     public async Task GetAllAsync_does_not_swallow_cancellation()
     {
@@ -32,6 +35,8 @@ public sealed class DistributedContactRequestCacheTests
         await Assert.ThrowsAsync<OperationCanceledException>(() => sut.GetAllAsync(cancellation.Token));
     }
 
+    /// <summary>Checks that cancellation from the distributed cache write reaches the contact cache caller.</summary>
+    /// <returns>A task that completes after asserting propagation of OperationCanceledException from the cache write.</returns>
     [Fact]
     public async Task SetAllAsync_does_not_swallow_cancellation()
     {
@@ -49,6 +54,8 @@ public sealed class DistributedContactRequestCacheTests
         await Assert.ThrowsAsync<OperationCanceledException>(() => sut.SetAllAsync([Request], cancellation.Token));
     }
 
+    /// <summary>Checks that cancellation from distributed cache removal reaches the contact cache invalidation caller.</summary>
+    /// <returns>A task that completes after asserting propagation of OperationCanceledException from cache invalidation.</returns>
     [Fact]
     public async Task InvalidateAsync_does_not_swallow_cancellation()
     {

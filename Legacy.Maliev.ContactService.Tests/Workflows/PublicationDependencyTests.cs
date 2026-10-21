@@ -2,8 +2,10 @@ using YamlDotNet.RepresentationModel;
 
 namespace Legacy.Maliev.ContactService.Tests.Workflows;
 
+/// <summary>Checks immutable image-build dependencies and Docker restore inputs while preserving deployment admission.</summary>
 public sealed class PublicationDependencyTests
 {
+    /// <summary>Checks publisher dependency pins, the closed deployment gate, and copying shared build properties before Docker restore.</summary>
     [Fact]
     public void Publisher_ProvidesPinnedDockerDependencies_WithoutOpeningDeploymentGate()
     {

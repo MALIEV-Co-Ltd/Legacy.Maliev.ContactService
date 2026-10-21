@@ -18,6 +18,7 @@ public sealed class ProductionJwtAuthenticationTests
     private const string Audience = "https://api.maliev.com";
     private const string LegacyHmacKey = "test-key-at-least-32-characters-long"; // gitleaks:allow
 
+    /// <summary>Checks that service startup uses shared asymmetric JWT authentication and installs authentication before authorization.</summary>
     [Fact]
     public void Program_UsesSharedAsymmetricAuthentication()
     {
@@ -35,6 +36,7 @@ public sealed class ProductionJwtAuthenticationTests
         Assert.Contains("app.UseAuthorization();", program, StringComparison.Ordinal);
     }
 
+    /// <summary>Checks that production validation accepts the configured RS256 key and rejects HMAC and RS384 tokens.</summary>
     [Fact]
     public void Production_AcceptsExternalRs256_AndRejectsLegacyHmacAndOtherRsaAlgorithms()
     {
@@ -52,6 +54,7 @@ public sealed class ProductionJwtAuthenticationTests
             CreateToken(handler, new RsaSecurityKey(trustedRsa), SecurityAlgorithms.RsaSha384, Issuer, Audience), parameters, out _));
     }
 
+    /// <summary>Checks that production JWT validation rejects tokens with a different issuer, audience, or RSA signing key.</summary>
     [Fact]
     public void Production_RejectsWrongIssuerAudienceAndSigningKey()
     {
@@ -69,6 +72,8 @@ public sealed class ProductionJwtAuthenticationTests
             CreateToken(handler, new RsaSecurityKey(otherRsa), SecurityAlgorithms.RsaSha256, Issuer, Audience), parameters, out _));
     }
 
+    /// <summary>Checks that missing JWT public-key, issuer, or audience configuration prevents production authentication setup.</summary>
+    /// <param name="missingSetting">The JWT configuration key removed before setup: Jwt:PublicKey, Jwt:Issuer, or Jwt:Audience.</param>
     [Theory]
     [InlineData("Jwt:PublicKey")]
     [InlineData("Jwt:Issuer")]

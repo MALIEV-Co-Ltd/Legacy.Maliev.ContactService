@@ -11,11 +11,13 @@ using System.Reflection;
 
 namespace Legacy.Maliev.ContactService.Tests.Controllers;
 
+/// <summary>Checks legacy and versioned contact routes for distinct names, shared actions, and matching permission requirements.</summary>
 public sealed class VersionedContactRequestRouteTests
 {
     private const string LegacyCollection = "Messages";
     private const string VersionedCollection = "messages/v1/contact-requests";
 
+    /// <summary>Checks that the controller retains the Messages route and declares API version 1.0.</summary>
     [Fact]
     public void Controller_preserves_legacy_route_and_declares_v1()
     {
@@ -25,6 +27,7 @@ public sealed class VersionedContactRequestRouteTests
         Assert.Equal("1.0", controller.GetCustomAttribute<ApiVersionAttribute>()?.Versions.Single().ToString());
     }
 
+    /// <summary>Checks that legacy and versioned detail routes have distinct names while GetMessage remains attached to the legacy messageId route.</summary>
     [Fact]
     public void Named_get_routes_are_distinct_and_keep_GetMessage_for_legacy_location_headers()
     {
@@ -41,6 +44,7 @@ public sealed class VersionedContactRequestRouteTests
         Assert.Equal(2, routes.Select(route => route.Name).Distinct(StringComparer.Ordinal).Count());
     }
 
+    /// <summary>Checks API discovery for unique method-and-path pairs and equivalent legacy and versioned actions and permissions.</summary>
     [Fact]
     public void ApiExplorer_exposes_non_ambiguous_legacy_and_versioned_route_parity()
     {

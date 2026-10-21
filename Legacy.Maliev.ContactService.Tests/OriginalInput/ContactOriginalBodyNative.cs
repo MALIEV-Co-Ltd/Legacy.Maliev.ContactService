@@ -52,11 +52,14 @@ internal static class ContactOriginalBodyNative
 
 // One normal disposable PG/factory for all reader rows; never one server per
 // MemberData case. Initialization failure and normal completion release both.
+/// <summary>Owns one disposable PostgreSQL fixture and Contact runtime factory shared across body-reader theory rows.</summary>
 public sealed class ContactOriginalBodyReaderFixture : IAsyncLifetime
 {
     private readonly ContactRuntimePostgresFixture postgres = new();
     internal ContactRuntimeFactory Factory { get; private set; } = null!;
 
+    /// <summary>Starts the shared reader database fixture and constructs its runtime factory, releasing PostgreSQL if factory creation fails.</summary>
+    /// <returns>A task that completes when PostgreSQL and the shared Contact runtime factory are initialized.</returns>
     public async Task InitializeAsync()
     {
         await postgres.InitializeAsync();
@@ -71,6 +74,8 @@ public sealed class ContactOriginalBodyReaderFixture : IAsyncLifetime
         }
     }
 
+    /// <summary>Disposes the shared runtime factory and releases PostgreSQL even if factory disposal fails.</summary>
+    /// <returns>A task that completes when the shared runtime factory and PostgreSQL fixture have been disposed.</returns>
     public async Task DisposeAsync()
     {
         try

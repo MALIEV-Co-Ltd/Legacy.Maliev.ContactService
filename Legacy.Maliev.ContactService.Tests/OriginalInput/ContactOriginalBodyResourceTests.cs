@@ -11,6 +11,8 @@ using Microsoft.Extensions.Options;
 
 namespace Legacy.Maliev.ContactService.Tests.OriginalInput;
 
+/// <summary>Verifies formatter buffer ownership, caller-stream preservation, and cleanup across success, cancellation, and faults.</summary>
+/// <param name="postgres">The shared disposable PostgreSQL fixture supplying the connection string for isolated Contact runtime factories.</param>
 [Collection("Contact original body")]
 public sealed class ContactOriginalBodyResourceTests(ContactRuntimePostgresFixture postgres)
     : IClassFixture<ContactRuntimePostgresFixture>
@@ -18,6 +20,9 @@ public sealed class ContactOriginalBodyResourceTests(ContactRuntimePostgresFixtu
     private static byte[] LargeBody() => Encoding.UTF8.GetBytes(
         "{\"FirstName\":\"N\",\"MessageContent\":\"" + new string('ก', 40000) + "\"}");
 
+    /// <summary>Checks fragmented spill projection and temporary-buffer release without disposing the caller's request stream.</summary>
+    /// <param name="candidate">Whether to exercise the candidate formatter rather than the original stock formatter.</param>
+    /// <returns>A task that completes when spill projection, buffer disposal, file removal, and caller-stream ownership assertions finish.</returns>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -67,6 +72,9 @@ public sealed class ContactOriginalBodyResourceTests(ContactRuntimePostgresFixtu
         }
     }
 
+    /// <summary>Checks candidate cancellation before draining against the original reader's uncancelled drain behavior.</summary>
+    /// <param name="candidate">Whether to verify candidate cancellation with no bytes read rather than original stock draining with a noncancellable token.</param>
+    /// <returns>A task that completes when both cancellation policies and owned-resource cleanup assertions finish.</returns>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -110,6 +118,9 @@ public sealed class ContactOriginalBodyResourceTests(ContactRuntimePostgresFixtu
         }
     }
 
+    /// <summary>Checks that candidate drain or size-limit failures release spill files and restore the caller stream without becoming malformed-input errors.</summary>
+    /// <param name="fault">Whether the input stream throws after 40,000 bytes rather than exceeding a 40,000-byte request size limit.</param>
+    /// <returns>A task that completes when the expected I/O failure preserves request-stream ownership and releases all owned spill resources.</returns>
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -136,6 +147,8 @@ public sealed class ContactOriginalBodyResourceTests(ContactRuntimePostgresFixtu
         }
     }
 
+    /// <summary>Checks charset rejection before reading and restoration of the caller's position after successful seekable input.</summary>
+    /// <returns>A task that completes when early charset rejection and seekable-stream position restoration are verified.</returns>
     [Fact]
     public async Task CharsetFailurePrecedesBodyRead_AndSuccessfulSeekableInputReturnsToCallerPosition()
     {
@@ -179,6 +192,8 @@ public sealed class ContactOriginalBodyResourceTests(ContactRuntimePostgresFixtu
         }
     }
 
+    /// <summary>Checks that both readers preserve unexpected UTF-8 decoder faults while releasing their owned buffers.</summary>
+    /// <returns>A task that completes when both readers preserve decoder exceptions and release owned resources.</returns>
     [Fact]
     public async Task InvalidUtf8_PreservesUnexpectedDecoderFaultAndOwnedCleanupOnBothReaders()
     {

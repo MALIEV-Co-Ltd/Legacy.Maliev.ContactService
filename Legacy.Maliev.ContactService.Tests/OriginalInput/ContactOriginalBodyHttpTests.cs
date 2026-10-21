@@ -10,9 +10,12 @@ using SourceJson = Newtonsoft.Json.JsonConvert;
 
 namespace Legacy.Maliev.ContactService.Tests.OriginalInput;
 
+/// <summary>Serializes original-body HTTP and resource tests that share database state.</summary>
 [CollectionDefinition("Contact original body", DisableParallelization = true)]
 public sealed class ContactOriginalBodyHttpCollection;
 
+/// <summary>Verifies original request-body behavior through authenticated Contact HTTP writes, persistence, and cache readback.</summary>
+/// <param name="postgres">The shared disposable PostgreSQL fixture supplying the connection string for isolated Contact runtime factories.</param>
 [Collection("Contact original body")]
 public sealed class ContactOriginalBodyHttpTests(ContactRuntimePostgresFixture postgres)
     : IClassFixture<ContactRuntimePostgresFixture>
@@ -26,6 +29,8 @@ public sealed class ContactOriginalBodyHttpTests(ContactRuntimePostgresFixture p
     private static readonly byte[] AllSentinel = Encoding.UTF8.GetBytes("synthetic existing message cache");
     private static readonly byte[] OtherSentinel = Encoding.UTF8.GetBytes("synthetic unrelated cache");
 
+    /// <summary>Provides each Contact write route paired with accepted original JSON grammar and encoding variants.</summary>
+    /// <returns>Theory rows containing the write lane and source-producer, single-quotes, unquoted-names, comments, trailing-comma, additional-object, trailing-text, or utf16 variant.</returns>
     public static IEnumerable<object[]> GrammarCases()
     {
         foreach (var lane in Lanes)
@@ -41,6 +46,10 @@ public sealed class ContactOriginalBodyHttpTests(ContactRuntimePostgresFixture p
         }
     }
 
+    /// <summary>Checks that accepted original grammar preserves all seven contact values while identity and timestamps remain server controlled.</summary>
+    /// <param name="lane">The legacy-create, legacy-update, versioned-create, or versioned-update HTTP write route and operation to exercise.</param>
+    /// <param name="grammar">The accepted grammar or encoding variant applied to the seven-field producer payload, including unchanged source-producer and UTF-16 input.</param>
+    /// <returns>A task that completes when seven-field persistence, server-owned identity and dates, public readback, and cache assertions finish.</returns>
     [Theory]
     [MemberData(nameof(GrammarCases))]
     public async Task OriginalGrammar_PreservesSevenFieldsAndServerOwnedIdentity(string lane, string grammar)
@@ -62,6 +71,9 @@ public sealed class ContactOriginalBodyHttpTests(ContactRuntimePostgresFixture p
         await AssertSuccessfulWrite(lane, json, expected, grammar == "utf16");
     }
 
+    /// <summary>Checks original numeric and Boolean conversion to contact text without trimming or normalizing numeric lexemes.</summary>
+    /// <param name="lane">The legacy-create, legacy-update, versioned-create, or versioned-update HTTP write route and operation to exercise.</param>
+    /// <returns>A task that completes when primitive contact values preserve their exact expected text through the complete write pipeline.</returns>
     [Theory]
     [InlineData("legacy-create")]
     [InlineData("legacy-update")]
@@ -78,6 +90,8 @@ public sealed class ContactOriginalBodyHttpTests(ContactRuntimePostgresFixture p
             ["42", "false", "true", "-12.50", "1e+02", "0", "123456789012345678901234567890"]);
     }
 
+    /// <summary>Provides ordered-null retention and empty, omitted, or explicit-null clearing scenarios for every write route.</summary>
+    /// <returns>Theory rows containing the write lane and retain, empty-clears, default-null-clears, or explicit-null-clears mode.</returns>
     public static IEnumerable<object[]> DuplicateCases()
     {
         foreach (var lane in Lanes)
@@ -89,6 +103,10 @@ public sealed class ContactOriginalBodyHttpTests(ContactRuntimePostgresFixture p
         }
     }
 
+    /// <summary>Checks duplicate-null value retention and clearing of stored contact fields by empty, omitted, or null inputs.</summary>
+    /// <param name="lane">The legacy-create, legacy-update, versioned-create, or versioned-update HTTP write route and operation to exercise.</param>
+    /// <param name="mode">The retain, empty-clears, default-null-clears, or explicit-null-clears payload scenario selecting the expected values of all seven fields.</param>
+    /// <returns>A task that completes when ordered null retention and field-clearing persistence assertions finish.</returns>
     [Theory]
     [MemberData(nameof(DuplicateCases))]
     public async Task OrderedNullsRetainValues_EmptyAndAbsentSlotsClearStoredFields(string lane, string mode)
@@ -102,6 +120,8 @@ public sealed class ContactOriginalBodyHttpTests(ContactRuntimePostgresFixture p
         await AssertSuccessfulWrite(lane, json, Enumerable.Repeat(value, 7).ToArray());
     }
 
+    /// <summary>Provides invalid server-owned scalar occurrences for existing and missing contact write targets.</summary>
+    /// <returns>Theory rows containing the write lane, Id or timestamp field, and whether an update targets a missing record.</returns>
     public static IEnumerable<object[]> InvalidIgnoredCases()
     {
         foreach (var lane in Lanes)
@@ -117,6 +137,11 @@ public sealed class ContactOriginalBodyHttpTests(ContactRuntimePostgresFixture p
         }
     }
 
+    /// <summary>Checks that invalid earlier identity or timestamp values fail binding before record lookup or mutation.</summary>
+    /// <param name="lane">The legacy-create, legacy-update, versioned-create, or versioned-update HTTP write route and operation to exercise.</param>
+    /// <param name="field">The recognized Id, CreatedDate, or ModifiedDate property given an invalid first value before the valid producer occurrence.</param>
+    /// <param name="missing">Whether an update targets a missing record to prove binding rejection precedes lookup.</param>
+    /// <returns>A task that completes when invalid identity or timestamp input returns 400 without lookup-dependent status or mutation.</returns>
     [Theory]
     [MemberData(nameof(InvalidIgnoredCases))]
     public async Task InvalidEarlierRecognizedIdentityOrDate_RejectsBeforeLookupAndMutation(string lane, string field, bool missing)
@@ -127,6 +152,8 @@ public sealed class ContactOriginalBodyHttpTests(ContactRuntimePostgresFixture p
         await AssertRejectedWrite(lane, json, HttpStatusCode.BadRequest, missing);
     }
 
+    /// <summary>Provides values at and just beyond the six bounded contact text fields' length limit.</summary>
+    /// <returns>Theory rows containing each write lane and a text length of 50 or 51 characters.</returns>
     public static IEnumerable<object[]> CapacityCases()
     {
         foreach (var lane in Lanes)
@@ -136,6 +163,10 @@ public sealed class ContactOriginalBodyHttpTests(ContactRuntimePostgresFixture p
         }
     }
 
+    /// <summary>Checks the 50-character limit on six contact fields while leaving message content outside that limit.</summary>
+    /// <param name="lane">The legacy-create, legacy-update, versioned-create, or versioned-update HTTP write route and operation to exercise.</param>
+    /// <param name="length">The character count assigned to FirstName, LastName, Company, Email, Telephone, and Country: 50 must succeed and 51 must fail validation.</param>
+    /// <returns>A task that completes when boundary-length inputs either persist successfully or return the expected field validation errors.</returns>
     [Theory]
     [MemberData(nameof(CapacityCases))]
     public async Task OrdinaryMvcStringLengthValidation_RemainsOnAllSixLimitedFields(string lane, int length)
@@ -153,6 +184,8 @@ public sealed class ContactOriginalBodyHttpTests(ContactRuntimePostgresFixture p
         }
     }
 
+    /// <summary>Provides original-reader inputs that produce no bound contact model.</summary>
+    /// <returns>Theory rows pairing each write lane with an empty body, JSON null, whitespace, empty-string root, or unresolved reference.</returns>
     public static IEnumerable<object[]> NoValueCases()
     {
         foreach (var lane in Lanes)
@@ -164,6 +197,10 @@ public sealed class ContactOriginalBodyHttpTests(ContactRuntimePostgresFixture p
         }
     }
 
+    /// <summary>Checks that inputs producing no model retain required-body 400 responses without writes.</summary>
+    /// <param name="lane">The legacy-create, legacy-update, versioned-create, or versioned-update HTTP write route and operation to exercise.</param>
+    /// <param name="json">The complete body text that the original reader treats as no value: empty, null, whitespace, an empty string root, or an unresolved reference.</param>
+    /// <returns>A task that completes when no-value input returns the required-body 400 response without database or cache mutation.</returns>
     [Theory]
     [MemberData(nameof(NoValueCases))]
     public async Task OriginalNoValue_RemainsRequiredBody400WithoutWrite(string lane, string json)
@@ -171,6 +208,9 @@ public sealed class ContactOriginalBodyHttpTests(ContactRuntimePostgresFixture p
         await AssertRejectedWrite(lane, json, HttpStatusCode.BadRequest);
     }
 
+    /// <summary>Checks that an unsupported request charset returns a private 415 response without writes.</summary>
+    /// <param name="lane">The legacy-create, legacy-update, versioned-create, or versioned-update HTTP write route and operation to exercise.</param>
+    /// <returns>A task that completes when charset rejection returns 415 without disclosing the supplied charset or changing stored data.</returns>
     [Theory]
     [InlineData("legacy-create")]
     [InlineData("legacy-update")]
@@ -182,6 +222,8 @@ public sealed class ContactOriginalBodyHttpTests(ContactRuntimePostgresFixture p
             HttpStatusCode.UnsupportedMediaType, contentType: "application/json; charset=x-private-charset-marker");
     }
 
+    /// <summary>Provides negative, zero, and absent positive identifiers for both update route families.</summary>
+    /// <returns>Theory rows pairing legacy-update or versioned-update with -1, 0, or int.MaxValue.</returns>
     public static IEnumerable<object[]> MissingCases()
     {
         foreach (var lane in new[] { "legacy-update", "versioned-update" })
@@ -193,6 +235,10 @@ public sealed class ContactOriginalBodyHttpTests(ContactRuntimePostgresFixture p
         }
     }
 
+    /// <summary>Checks missing-record 404 responses and versioned nonpositive-identifier 400 responses after valid original binding.</summary>
+    /// <param name="lane">The legacy-update or versioned-update route family whose identifier validation is checked.</param>
+    /// <param name="id">The update target identifier: -1, 0, or int.MaxValue, distinguishing invalid versioned identifiers from missing records.</param>
+    /// <returns>A task that completes when valid binding retains the route-specific missing or nonpositive identifier response without mutation.</returns>
     [Theory]
     [MemberData(nameof(MissingCases))]
     public async Task ValidBinding_PreservesOrdinaryMissingAndVersionedNonpositiveStatus(string lane, int id)
@@ -201,6 +247,8 @@ public sealed class ContactOriginalBodyHttpTests(ContactRuntimePostgresFixture p
         await AssertRejectedWrite(lane, """{'MessageContent':'valid source grammar'}""", expected, targetId: id);
     }
 
+    /// <summary>Provides anonymous, invalid-signature, expired-token, and missing-permission scenarios for every write route.</summary>
+    /// <returns>Theory rows containing the write lane and anonymous, wrong-key, expired, or no-permission authorization scenario.</returns>
     public static IEnumerable<object[]> AuthorityCases()
     {
         foreach (var lane in Lanes)
@@ -212,6 +260,10 @@ public sealed class ContactOriginalBodyHttpTests(ContactRuntimePostgresFixture p
         }
     }
 
+    /// <summary>Checks that original body binding preserves production RS256 authentication and permission enforcement.</summary>
+    /// <param name="lane">The legacy-create, legacy-update, versioned-create, or versioned-update HTTP write route and operation to exercise.</param>
+    /// <param name="scenario">The anonymous, wrong-key, expired, or no-permission request authority scenario; only no-permission expects 403, while the others expect 401.</param>
+    /// <returns>A task that completes when production authentication and permission failures retain their expected 401 or 403 responses.</returns>
     [Theory]
     [MemberData(nameof(AuthorityCases))]
     public async Task OriginalBinding_DoesNotBypassProductionRs256OrPermissions(string lane, string scenario)
@@ -221,6 +273,9 @@ public sealed class ContactOriginalBodyHttpTests(ContactRuntimePostgresFixture p
             scenario: scenario);
     }
 
+    /// <summary>Checks that racing original-grammar updates produce one successful write and one xmin conflict.</summary>
+    /// <param name="lane">The legacy-update or versioned-update route used by both concurrent requests.</param>
+    /// <returns>A task that completes when concurrent updates yield one 204 and one 409 with the expected stored winner and cache behavior.</returns>
     [Theory]
     [InlineData("legacy-update")]
     [InlineData("versioned-update")]

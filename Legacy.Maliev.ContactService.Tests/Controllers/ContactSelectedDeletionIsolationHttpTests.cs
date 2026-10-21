@@ -5,10 +5,15 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Legacy.Maliev.ContactService.Tests.Controllers;
 
+/// <summary>Checks selected-message deletion isolation and surviving message reads through both route aliases.</summary>
+/// <param name="postgres">The shared disposable PostgreSQL fixture holding selected and unrelated synthetic contact messages.</param>
 [Collection("Contact literal payload")]
 public sealed class ContactSelectedDeletionIsolationHttpTests(ContactRuntimePostgresFixture postgres)
     : IClassFixture<ContactRuntimePostgresFixture>
 {
+    /// <summary>Checks that deleting one message preserves unrelated rows and makes the selected message absent through both aliases.</summary>
+    /// <param name="deleteRoute">The contact collection alias used for the initial deletion: /Messages or /messages/v1/contact-requests.</param>
+    /// <returns>A task that completes after verifying that deleting one message preserves unrelated rows and makes the selected message absent through both aliases.</returns>
     [Theory]
     [InlineData("/Messages")]
     [InlineData("/messages/v1/contact-requests")]

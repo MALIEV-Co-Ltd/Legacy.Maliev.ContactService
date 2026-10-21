@@ -1,7 +1,9 @@
 namespace Legacy.Maliev.ContactService.Tests.Workflows;
 
+/// <summary>Checks dependency-updater project scope and compatibility of coordinated EF and Npgsql runtime updates.</summary>
 public sealed class DependabotConfigurationContractTests
 {
+    /// <summary>Checks that NuGet scanning covers only independently resolvable Application, Data, and Domain project directories.</summary>
     [Fact]
     public void NuGetUpdater_ScansOnlyIndependentlyResolvableProjectDirectories()
     {
@@ -21,6 +23,7 @@ public sealed class DependabotConfigurationContractTests
         Assert.Equal(3, source.Split("\n      - /Legacy.Maliev.ContactService.", StringSplitOptions.None).Length - 1);
     }
 
+    /// <summary>Checks that EF Core and Npgsql runtime packages remain eligible for coordinated dependency updates.</summary>
     [Fact]
     public void NuGetUpdater_AllowsCoordinatedEfAndNpgsqlRuntimeGraph()
     {

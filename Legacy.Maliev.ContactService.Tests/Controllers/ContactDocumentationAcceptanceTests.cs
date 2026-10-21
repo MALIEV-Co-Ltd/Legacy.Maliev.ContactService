@@ -6,9 +6,14 @@ using Microsoft.AspNetCore.Mvc.Testing;
 namespace Legacy.Maliev.ContactService.Tests.Controllers;
 
 /// <summary>Consumes actual service documentation over HTTP, without mocking document generation.</summary>
+/// <param name="postgres">The shared disposable PostgreSQL fixture used by application hosts that generate documentation over HTTP.</param>
 public sealed class ContactDocumentationAcceptanceTests(ContactRuntimePostgresFixture postgres)
     : IClassFixture<ContactRuntimePostgresFixture>
 {
+    /// <summary>Checks OpenAPI and Scalar availability in development and staging while hiding documentation in production.</summary>
+    /// <param name="environment">The ASP.NET Core host environment used for the documentation request.</param>
+    /// <param name="exposed">Whether OpenAPI is expected to return a document rather than not found in the selected environment.</param>
+    /// <returns>A task that completes after verifying OpenAPI and Scalar availability in development and staging while hiding documentation in production.</returns>
     [Theory]
     [InlineData("Development", true)]
     [InlineData("Staging", true)]
@@ -30,6 +35,8 @@ public sealed class ContactDocumentationAcceptanceTests(ContactRuntimePostgresFi
         Assert.Contains("messages/openapi/v1.json", await page.Content.ReadAsStringAsync(), StringComparison.Ordinal);
     }
 
+    /// <summary>Checks that generated OpenAPI advertises bearer authentication for every maintained contact operation.</summary>
+    /// <returns>A task that completes after verifying that generated OpenAPI advertises bearer authentication for every maintained contact operation.</returns>
     [Fact]
     public async Task Documentation_DescribesActualBearerAuthorization()
     {
@@ -54,6 +61,8 @@ public sealed class ContactDocumentationAcceptanceTests(ContactRuntimePostgresFi
         }
     }
 
+    /// <summary>Checks that all ten contact operations expose maintained nonempty summaries in the generated OpenAPI document.</summary>
+    /// <returns>A task that completes after verifying that all ten contact operations expose maintained nonempty summaries in the generated OpenAPI document.</returns>
     [Fact]
     public async Task Documentation_ConsumesMaintainedOperationSummaries()
     {
@@ -81,6 +90,8 @@ public sealed class ContactDocumentationAcceptanceTests(ContactRuntimePostgresFi
         || path.Equals("/Messages/{messageId}", StringComparison.OrdinalIgnoreCase)
         || path.Contains("/contact-requests", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Checks that listing documentation describes sorting, search, paging, and the actual empty-page not-found response.</summary>
+    /// <returns>A task that completes after verifying that listing documentation describes sorting, search, paging, and the actual empty-page not-found response.</returns>
     [Fact]
     public async Task Documentation_ExplainsQueriesAndActualEmptyPageResponse()
     {
@@ -101,6 +112,8 @@ public sealed class ContactDocumentationAcceptanceTests(ContactRuntimePostgresFi
         }
     }
 
+    /// <summary>Checks that creation documentation describes the contact details accepted in the request body.</summary>
+    /// <returns>A task that completes after verifying that creation documentation describes the contact details accepted in the request body.</returns>
     [Fact]
     public async Task Documentation_ExplainsCreatePayloadWithoutIdentityOrStorageSecrets()
     {
@@ -113,6 +126,8 @@ public sealed class ContactDocumentationAcceptanceTests(ContactRuntimePostgresFi
         Assert.Contains("contact details", description.GetString(), StringComparison.Ordinal);
     }
 
+    /// <summary>Checks documented mutation responses, the seven legacy payload fields, omitted request identity, and timestamp guidance.</summary>
+    /// <returns>A task that completes after verifying documented mutation responses, the seven legacy payload fields, omitted request identity, and timestamp guidance.</returns>
     [Fact]
     public async Task Documentation_DescribesExistingMutationResultsAndPayloadSchemas()
     {

@@ -24,12 +24,16 @@ using Microsoft.Extensions.Options;
 
 namespace Legacy.Maliev.ContactService.Tests.OriginalInput;
 
+/// <summary>Checks that the original contact-body formatter is confined to its request DTO while retaining native serializer, schema, validation, and diagnostic boundaries.</summary>
+/// <param name="postgres">The shared PostgreSQL fixture supplying host connection settings, database reset, and fresh contexts for contact-body persistence assertions.</param>
 [Collection("Contact original body")]
 public sealed class ContactOriginalBodyBoundaryTests(ContactRuntimePostgresFixture postgres)
     : IClassFixture<ContactRuntimePostgresFixture>
 {
     private const string FormatterCategory = "Microsoft.AspNetCore.Mvc.Formatters.NewtonsoftJsonInputFormatter";
 
+    /// <summary>Checks that only the contact upsert DTO selects the owned formatter and that remaining input formatters and all output formatters retain native order.</summary>
+    /// <returns>A task that completes after asserting formatter selection, media compatibility, native formatter ordering, and exclusion of unrelated types.</returns>
     [Fact]
     public async Task Selection_IsOnlyOwnedDtoAndPreservesNativeFormatterAndWriterOrder()
     {
@@ -54,6 +58,8 @@ public sealed class ContactOriginalBodyBoundaryTests(ContactRuntimePostgresFixtu
             Assert.False(owned.CanRead(Context(type, metadata)));
     }
 
+    /// <summary>Checks that reading an original-style scalar leaves MVC and minimal-API System.Text.Json options, metadata callbacks, and serialized output unchanged.</summary>
+    /// <returns>A task that completes after asserting source-compatible input conversion and preservation of native option instances, resolver chains, converters, metadata, and output.</returns>
     [Fact]
     public async Task FreshNativeOptionsAndRead_KeepExistingStjOptionsCallbacksAndOutput()
     {
@@ -96,6 +102,8 @@ public sealed class ContactOriginalBodyBoundaryTests(ContactRuntimePostgresFixtu
         Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<UpsertContactRequestRequest>("{\"FirstName\":123}", minimal));
     }
 
+    /// <summary>Checks that served OpenAPI retains the native contact request schema, all seven property names, and every request media entry referencing that schema.</summary>
+    /// <returns>A task that completes after comparing the adapted and native request schemas and their referencing request media entries.</returns>
     [Fact]
     public async Task ServedOpenApi_KeepsNativeRequestSchemaAndAllRequestMedia()
     {
@@ -120,6 +128,7 @@ public sealed class ContactOriginalBodyBoundaryTests(ContactRuntimePostgresFixtu
         Assert.Equal(media, RequestMedia(actual, name));
     }
 
+    /// <summary>Checks that the six bounded contact fields retain 50-character attributes on record constructor parameters while message content has no string-length attribute.</summary>
     [Fact]
     public void ExistingSixLengthAttributes_RemainOnRecordParametersWithNoMessageLimit()
     {
@@ -133,6 +142,9 @@ public sealed class ContactOriginalBodyBoundaryTests(ContactRuntimePostgresFixtu
         }
     }
 
+    /// <summary>Checks that MVC rejects a 51-character value in each bounded contact field before any request is persisted.</summary>
+    /// <param name="field">The bounded request property, FirstName, LastName, Company, Email, Telephone, or Country, replaced with 51 characters before submission.</param>
+    /// <returns>A task that completes after asserting a bad-request response and an empty message table for the selected oversized field.</returns>
     [Theory]
     [InlineData("FirstName")]
     [InlineData("LastName")]
@@ -154,6 +166,8 @@ public sealed class ContactOriginalBodyBoundaryTests(ContactRuntimePostgresFixtu
         Assert.Equal(0, await db.Messages.CountAsync());
     }
 
+    /// <summary>Checks that MVC accepts and persists 501 Thai characters in message content despite the separate 50-character contact-field limits.</summary>
+    /// <returns>A task that completes after asserting a created response and exact persistence of the long message content.</returns>
     [Fact]
     public async Task ActualMvc_MessageContentOver50RemainsUnboundedAndPersisted()
     {
@@ -169,6 +183,8 @@ public sealed class ContactOriginalBodyBoundaryTests(ContactRuntimePostgresFixtu
         Assert.Equal(body["MessageContent"], (await db.Messages.SingleAsync()).MessageContent);
     }
 
+    /// <summary>Checks that owned formatter failures produce debug diagnostics without exposing input markers through errors, log state, scopes, or exception objects.</summary>
+    /// <returns>A task that completes after asserting nonempty formatter debug logging and sanitized errors, structured state, scopes, and exception fields for malformed bodies and unsupported charset input.</returns>
     [Fact]
     public async Task ActualFormatterDebug_IsNonemptyAndContainsNoInputPathsValuesCharsetOrException()
     {

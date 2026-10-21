@@ -8,6 +8,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Legacy.Maliev.ContactService.Tests.Controllers;
 
+/// <summary>Checks ordinary and versioned zero-size paging, access enforcement, query binding, and preservation of stored rows and cache entries.</summary>
+/// <param name="postgres">The shared disposable PostgreSQL fixture seeded with synthetic rows for page-boundary assertions.</param>
 [Collection("Contact literal payload")]
 public sealed class ContactOrdinaryZeroSizeHttpTests(ContactRuntimePostgresFixture postgres)
     : IClassFixture<ContactRuntimePostgresFixture>
@@ -15,6 +17,10 @@ public sealed class ContactOrdinaryZeroSizeHttpTests(ContactRuntimePostgresFixtu
     private const string CacheKey = "legacy:contact:messages:all:v1";
     private const string OtherCacheKey = "legacy:contact:zero-size:unrelated";
 
+    /// <summary>Checks that ordinary zero-size pages return the source empty-page response while preserving database rows and caches.</summary>
+    /// <param name="index">The requested page index combined with an explicit size of zero, including zero and the largest Int32 value.</param>
+    /// <param name="populated">Whether synthetic messages are stored before requesting the zero-size page.</param>
+    /// <returns>A task that completes after verifying that ordinary zero-size pages return the source empty-page response while preserving database rows and caches.</returns>
     [Theory]
     [InlineData(0, true)]
     [InlineData(1, true)]
@@ -61,6 +67,9 @@ public sealed class ContactOrdinaryZeroSizeHttpTests(ContactRuntimePostgresFixtu
         await AssertCacheAsync(cache, token);
     }
 
+    /// <summary>Checks that the versioned route keeps its accepted clamp from zero page size to one returned row.</summary>
+    /// <param name="index">The requested zero or one page index, both expected to clamp to the first versioned page.</param>
+    /// <returns>A task that completes after verifying that the versioned route keeps its accepted clamp from zero page size to one returned row.</returns>
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -90,6 +99,10 @@ public sealed class ContactOrdinaryZeroSizeHttpTests(ContactRuntimePostgresFixtu
         await AssertCacheAsync(cache, token);
     }
 
+    /// <summary>Checks that an ordinary zero-size request still requires valid authentication and the read permission.</summary>
+    /// <param name="scenario">The rejected caller scenario: anonymous, no-permission, wrong-key, or expired.</param>
+    /// <param name="expected">The expected unauthorized or forbidden HTTP response for the caller scenario.</param>
+    /// <returns>A task that completes after verifying that an ordinary zero-size request still requires valid authentication and the read permission.</returns>
     [Theory]
     [InlineData("anonymous", HttpStatusCode.Unauthorized)]
     [InlineData("no-permission", HttpStatusCode.Forbidden)]
@@ -115,6 +128,9 @@ public sealed class ContactOrdinaryZeroSizeHttpTests(ContactRuntimePostgresFixtu
         await AssertCacheAsync(cache, token);
     }
 
+    /// <summary>Checks that zero-size handling does not hide invalid index, sort, or size query-binding errors.</summary>
+    /// <param name="query">The query string containing an invalid paging or sort value expected to produce a bad request.</param>
+    /// <returns>A task that completes after verifying that zero-size handling does not hide invalid index, sort, or size query-binding errors.</returns>
     [Theory]
     [InlineData("?size=0&index=not-an-index")]
     [InlineData("?size=0&sort=not-a-sort")]
@@ -136,6 +152,10 @@ public sealed class ContactOrdinaryZeroSizeHttpTests(ContactRuntimePostgresFixtu
         await AssertCacheAsync(cache, token);
     }
 
+    /// <summary>Checks default and positive ordinary page sizes while preserving source metadata, stored rows, and cached values.</summary>
+    /// <param name="size">The size query value; null omits the parameter, while 1 requests a single message.</param>
+    /// <param name="expectedCount">The number of messages expected on the first page: two for omitted size or one for size 1.</param>
+    /// <returns>A task that completes after verifying default and positive ordinary page sizes while preserving source metadata, stored rows, and cached values.</returns>
     [Theory]
     [InlineData(null, 2)]
     [InlineData("1", 1)]
