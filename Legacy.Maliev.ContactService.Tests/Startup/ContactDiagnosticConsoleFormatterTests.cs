@@ -17,9 +17,13 @@ using Microsoft.Extensions.Options;
 
 namespace Legacy.Maliev.ContactService.Tests.Startup;
 
+/// <summary>Verifies safe private console diagnostics through direct formatting and configured production host pipelines.</summary>
 [Collection(nameof(ContactConsoleCaptureCollection))]
 public sealed class ContactDiagnosticConsoleFormatterTests
 {
+    /// <summary>Checks severity filtering and fixed safe messages without invoking arbitrary message formatters.</summary>
+    /// <param name="level">The log level supplied to the formatter, including suppressed levels and Warning, Error, or Critical.</param>
+    /// <param name="severity">The expected uppercase severity of an emitted event, or null when the selected level must emit nothing.</param>
     [Theory]
     [InlineData(LogLevel.Trace, null)]
     [InlineData(LogLevel.Debug, null)]
@@ -43,6 +47,7 @@ public sealed class ContactDiagnosticConsoleFormatterTests
         Assert.Equal(TimeSpan.Zero, DateTimeOffset.Parse(document.RootElement.GetProperty("occurredAtUtc").GetString()!, CultureInfo.InvariantCulture).Offset);
     }
 
+    /// <summary>Checks runtime exception, activity, source-location, and deployment provenance against forged state values.</summary>
     [Fact]
     public void PrivateFormatter_PreservesRuntimeExceptionActivityAndDeploymentProvenance()
     {
@@ -66,6 +71,8 @@ public sealed class ContactDiagnosticConsoleFormatterTests
         Assert.DoesNotContain("private@example.invalid", line);
     }
 
+    /// <summary>Checks runtime source locations for asynchronous and generic failures without leaking private exception text.</summary>
+    /// <returns>A task that completes when asynchronous and generic runtime source-location assertions finish.</returns>
     [Fact]
     public async Task PrivateFormatter_PreservesAsyncAndGenericReflectionSourceLocations()
     {
@@ -86,6 +93,7 @@ public sealed class ContactDiagnosticConsoleFormatterTests
         Assert.DoesNotContain("private@example.invalid", genericDocument.RootElement.GetRawText());
     }
 
+    /// <summary>Checks accepted diagnostic scalars and canonical correlation identifiers while preserving safe incident metadata.</summary>
     [Fact]
     public void PrivateFormatter_PreservesOriginalSafeFieldsAndModernTypeIncidentAdaptation()
     {
@@ -118,6 +126,8 @@ public sealed class ContactDiagnosticConsoleFormatterTests
             Assert.Equal(JsonSerializer.Serialize(field.Value), root.GetProperty(field.Key).GetRawText());
     }
 
+    /// <summary>Checks omission of unknown keys and invalid scalar representations from private diagnostic output.</summary>
+    /// <param name="key">The unrecognized or restricted state key supplied with an email-shaped value that must be excluded.</param>
     [Theory]
     [InlineData("EventName")]
     [InlineData("Path")]
@@ -136,6 +146,7 @@ public sealed class ContactDiagnosticConsoleFormatterTests
         Assert.DoesNotContain("private@example.invalid", line);
     }
 
+    /// <summary>Checks state precedence over scopes, unique output keys, and bounded scope traversal.</summary>
     [Fact]
     public void PrivateFormatter_StateWinsWithoutDuplicateKeysAndScopeProcessingIsBounded()
     {
@@ -160,6 +171,7 @@ public sealed class ContactDiagnosticConsoleFormatterTests
         finally { foreach (var handle in handles.AsEnumerable().Reverse()) handle.Dispose(); }
     }
 
+    /// <summary>Checks bounded state enumeration and safe logger fallback for untrusted or absent categories.</summary>
     [Fact]
     public void PrivateFormatter_StateEnumerationAndUntrustedCategoryFailClosed()
     {
@@ -172,6 +184,7 @@ public sealed class ContactDiagnosticConsoleFormatterTests
         Assert.Equal("ConfiguredLogger", missingCategory.RootElement.GetProperty("logger").GetString());
     }
 
+    /// <summary>Checks that the private formatter rejects a null output writer.</summary>
     [Fact]
     public void PrivateFormatter_NullWriterIsRejected()
     {
@@ -179,6 +192,7 @@ public sealed class ContactDiagnosticConsoleFormatterTests
         Assert.Throws<ArgumentNullException>(() => new ContactDiagnosticConsoleFormatter().Write(entry, null, null!));
     }
 
+    /// <summary>Checks private warning-level console registration while retaining other logging providers.</summary>
     [Fact]
     public void PrivateRegistration_SelectsOwnedWarningFormatterAndPreservesOtherProviders()
     {
@@ -198,6 +212,8 @@ public sealed class ContactDiagnosticConsoleFormatterTests
             && rule.CategoryName is null && rule.LogLevel == LogLevel.Warning);
     }
 
+    /// <summary>Checks the actual console queue's severity filtering, redaction, and correlated HTTP failure output while retaining other providers.</summary>
+    /// <returns>A task that completes when the real console provider queue has drained and severity, redaction, and HTTP incident assertions finish.</returns>
     [Fact]
     public async Task ConfiguredContactHost_ConsoleQueueFiltersInformationAndRedactsWarningAndHttpFailure()
     {
@@ -299,6 +315,8 @@ public sealed class ContactDiagnosticConsoleFormatterTests
     }
 
 
+    /// <summary>Checks stable per-host health identity, quiet successful probes, and private synthetic failure throttling through the configured host.</summary>
+    /// <returns>A task that completes when health identity, quiet probes, admitted synthetic events, and throttling assertions finish.</returns>
     [Fact]
     public async Task ConfiguredContactHost_HealthIdentityAndSyntheticProbePreserveQuietPrivateSourceContract()
     {
@@ -371,6 +389,10 @@ public sealed class ContactDiagnosticConsoleFormatterTests
         Assert.DoesNotContain("private@example.invalid", output.ToString(), StringComparison.Ordinal);
     }
 
+    /// <summary>Checks that nonregistered or non-GET health-shaped requests do not expose health or diagnostic identity headers.</summary>
+    /// <param name="path">The health-shaped request path outside the registered native GET health contract.</param>
+    /// <param name="method">The GET, POST, or HEAD verb used to distinguish registered GET probes from excluded requests.</param>
+    /// <returns>A task that completes when excluded health requests omit identity headers.</returns>
     [Theory]
     [InlineData("/messages/liveness", "POST")]
     [InlineData("/messages/readiness", "HEAD")]
@@ -386,6 +408,11 @@ public sealed class ContactDiagnosticConsoleFormatterTests
         Assert.False(response.Response.Headers.ContainsKey("X-Maliev-Diagnostic-Id"));
     }
 
+    /// <summary>Checks that disallowed diagnostic probe requests return a private 404 without synthetic observations.</summary>
+    /// <param name="method">The GET or rejected POST verb used for the diagnostic request.</param>
+    /// <param name="peer">The simulated remote IP address, including nonloopback and loopback peers used to exercise admission checks.</param>
+    /// <param name="nonce">The X-Maliev-Diagnostic-Id header value used to test a valid nonce with another failed gate or an invalid nonce.</param>
+    /// <returns>A task that completes when the disallowed probe returns a private 404 without synthetic failure observations.</returns>
     [Theory]
     [InlineData("GET", "203.0.113.8", "0123456789abcdef0123456789abcdef")]
     [InlineData("POST", "127.0.0.1", "0123456789abcdef0123456789abcdef")]
@@ -549,5 +576,6 @@ public sealed class ContactDiagnosticConsoleFormatterTests
     }
 }
 
+/// <summary>Serializes tests that replace process-wide console writers while capturing the real console logging queue.</summary>
 [CollectionDefinition(nameof(ContactConsoleCaptureCollection), DisableParallelization = true)]
 public sealed class ContactConsoleCaptureCollection { }

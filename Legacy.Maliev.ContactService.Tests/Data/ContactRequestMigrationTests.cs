@@ -10,8 +10,11 @@ using Testcontainers.PostgreSql;
 
 namespace Legacy.Maliev.ContactService.Tests.Data;
 
+/// <summary>Checks PostgreSQL contact-request pagination, update tracking, repeatable migration application, and native xmin concurrency storage.</summary>
 public sealed class ContactRequestMigrationTests
 {
+    /// <summary>Checks that PostgreSQL applies contact-content search, descending identifier sorting, and server-side pagination without tracking result entities.</summary>
+    /// <returns>A task that completes after asserting filtered row counts, exact page identifiers, LIMIT and OFFSET SQL, and an empty change tracker.</returns>
     [Fact]
     public async Task Paginated_query_filters_sorts_and_pages_in_postgres()
     {
@@ -51,6 +54,8 @@ public sealed class ContactRequestMigrationTests
         Assert.Empty(context.ChangeTracker.Entries());
     }
 
+    /// <summary>Checks that a single request read remains untracked and a later explicitly tracked update persists changed message content.</summary>
+    /// <returns>A task that completes after asserting untracked read behavior and successful persistence of the updated message content.</returns>
     [Fact]
     public async Task Single_read_is_untracked_and_detached_update_still_succeeds()
     {
@@ -83,6 +88,8 @@ public sealed class ContactRequestMigrationTests
                 .SingleAsync());
     }
 
+    /// <summary>Checks that applying migrations twice retains the Message table and uses PostgreSQL native xmin rather than a user-defined xmin column.</summary>
+    /// <returns>A task that completes after repeat migration application and schema assertions for the Message table and native xmin storage.</returns>
     [Fact]
     public async Task Initial_migration_applies_twice_and_preserves_native_xmin()
     {

@@ -8,6 +8,8 @@ using Newtonsoft.Json;
 
 namespace Legacy.Maliev.ContactService.Tests.OriginalInput;
 
+/// <summary>Compares the pinned original MVC reader, native reader, and candidate Contact reader using explicit expected outcomes.</summary>
+/// <param name="fixture">The shared reader fixture owning one PostgreSQL instance and runtime factory for all comparison rows.</param>
 [Collection("Contact original body")]
 public sealed class ContactOriginalBodyReaderTests(ContactOriginalBodyReaderFixture fixture)
     : IClassFixture<ContactOriginalBodyReaderFixture>
@@ -23,6 +25,8 @@ public sealed class ContactOriginalBodyReaderTests(ContactOriginalBodyReaderFixt
         return System.Text.Json.JsonSerializer.Serialize(values);
     }
 
+    /// <summary>Provides independently specified grammar, scalar, duplicate, metadata, and malformed-body reader outcomes.</summary>
+    /// <returns>Theory rows containing a case label, JSON body, original and native result kinds, candidate projection, and optional native projection.</returns>
     public static IEnumerable<object[]> Cases()
     {
         yield return Row("empty object", "{}", "success", "success", Projection(), Projection());
@@ -126,6 +130,14 @@ public sealed class ContactOriginalBodyReaderTests(ContactOriginalBodyReaderFixt
     private static object[] Row(string label, string json, string source, string native,
         string expected, string? nativeProjection = null) => [label, json, source, native, expected, nativeProjection!];
 
+    /// <summary>Checks each body reader against pinned result kinds and seven-field projections while rejecting private error text.</summary>
+    /// <param name="label">The descriptive theory-case label retained for identifying the input scenario.</param>
+    /// <param name="json">The complete request text supplied to all three body readers.</param>
+    /// <param name="sourceKind">The expected original and candidate reader result, such as success, failure, no-value, or a named thrown exception.</param>
+    /// <param name="nativeKind">The independently expected result kind from the native MVC reader.</param>
+    /// <param name="projection">The serialized seven-element contact-value array expected from successful original and candidate reads.</param>
+    /// <param name="nativeProjection">The serialized seven-element native-reader projection to assert when supplied, or null to omit that native projection assertion.</param>
+    /// <returns>A task that completes when original, native, and candidate reader outcomes satisfy their independent expectations.</returns>
     [Theory]
     [MemberData(nameof(Cases))]
     public async Task ActualStockSourceNativeAndCandidate_AgreeOnPinnedInputBoundary(
@@ -151,6 +163,10 @@ public sealed class ContactOriginalBodyReaderTests(ContactOriginalBodyReaderFixt
         _ = label;
     }
 
+    /// <summary>Checks that all three readers accept nesting through depth 32 and reject depth 33 even in skipped data.</summary>
+    /// <param name="depth">The nesting depth of an unknown JSON value, set to 31, 32, or 33.</param>
+    /// <param name="expected">The expected success or failure result for that nesting depth on all three readers.</param>
+    /// <returns>A task that completes when all three readers satisfy the asserted depth boundary.</returns>
     [Theory]
     [InlineData(31, "success")]
     [InlineData(32, "success")]
@@ -166,6 +182,11 @@ public sealed class ContactOriginalBodyReaderTests(ContactOriginalBodyReaderFixt
             Services.GetRequiredService<IOptions<MvcOptions>>().Value, bytes)).Kind);
     }
 
+    /// <summary>Checks stock media and charset selection and safe unsupported-charset classification before candidate draining.</summary>
+    /// <param name="contentType">The media type and optional charset supplied to the original and candidate formatters.</param>
+    /// <param name="unicode">Whether the request bytes use UTF-16 little endian rather than UTF-8.</param>
+    /// <param name="expected">The expected success, failure, or unsupported formatter result for the selected media type and encoding.</param>
+    /// <returns>A task that completes when media and charset selection match source outcomes without leaking unsupported charset values.</returns>
     [Theory]
     [InlineData("application/json", false, "success")]
     [InlineData("text/json", false, "success")]
@@ -190,6 +211,8 @@ public sealed class ContactOriginalBodyReaderTests(ContactOriginalBodyReaderFixt
         }
     }
 
+    /// <summary>Checks per-read reference isolation and bounded malformed-input errors with fixed paths that omit attacker input.</summary>
+    /// <returns>A task that completes when reference isolation and bounded redacted malformed-input error assertions finish.</returns>
     [Fact]
     public async Task ReferenceMapsArePerRead_AndMalformedPathsNeverEchoInputs()
     {
@@ -207,6 +230,7 @@ public sealed class ContactOriginalBodyReaderTests(ContactOriginalBodyReaderFixt
             Assert.DoesNotContain(string.Join("\n", bad.Messages.Concat(bad.Keys)), marker, StringComparison.Ordinal);
     }
 
+    /// <summary>Checks original MVC depth, null, reference-loop, buffering, and metadata defaults without enabling type activation.</summary>
     [Fact]
     public void OriginalMvcDefaults_KeepTypeActivationOffAndAdditionalContentUnchecked()
     {

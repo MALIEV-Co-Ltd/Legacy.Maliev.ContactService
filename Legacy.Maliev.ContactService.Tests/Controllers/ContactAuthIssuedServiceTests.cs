@@ -20,8 +20,12 @@ using Testcontainers.PostgreSql;
 namespace Legacy.Maliev.ContactService.Tests.Controllers;
 
 /// <summary>Actual Auth-issued service tokens through normal Production Contact and disposable PostgreSQL.</summary>
+/// <param name="fixture">The fixture owning the pinned Auth issuer process, ephemeral signing key, Contact host, and disposable PostgreSQL database.</param>
 public sealed class ContactAuthIssuedServiceTests(ContactAuthIssuedFixture fixture) : IClassFixture<ContactAuthIssuedFixture>
 {
+    /// <summary>Checks that actual Auth-issued create grants persist Thai contact data through both aliases without granting read access.</summary>
+    /// <param name="route">The contact collection alias receiving the authorized creation: /Messages or /messages/v1/contact-requests.</param>
+    /// <returns>A task that completes after verifying that actual Auth-issued create grants persist Thai contact data through both aliases without granting read access.</returns>
     [Theory]
     [InlineData("/Messages")]
     [InlineData("/messages/v1/contact-requests")]
@@ -62,6 +66,8 @@ public sealed class ContactAuthIssuedServiceTests(ContactAuthIssuedFixture fixtu
         Assert.Equal([SecurityAlgorithms.RsaSha256], parameters.ValidAlgorithms);
     }
 
+    /// <summary>Checks that repeated machine logins issue distinct token identifiers without refresh tokens or refresh-session storage.</summary>
+    /// <returns>A task that completes after verifying that repeated machine logins issue distinct token identifiers without refresh tokens or refresh-session storage.</returns>
     [Fact]
     public async Task ActualIssuer_RenewedMachineTokenHasFreshJti_NotRefreshState()
     {
@@ -78,6 +84,9 @@ public sealed class ContactAuthIssuedServiceTests(ContactAuthIssuedFixture fixtu
         Assert.False(await database.Database.SqlQueryRaw<bool>("SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = 'public' AND tablename = 'refresh_sessions') AS \"Value\"").SingleAsync());
     }
 
+    /// <summary>Checks that an actual Auth-issued read-only service token cannot create a contact message.</summary>
+    /// <param name="route">The contact collection alias receiving the forbidden creation attempt.</param>
+    /// <returns>A task that completes after verifying that an actual Auth-issued read-only service token cannot create a contact message.</returns>
     [Theory]
     [InlineData("/Messages")]
     [InlineData("/messages/v1/contact-requests")]
@@ -91,6 +100,9 @@ public sealed class ContactAuthIssuedServiceTests(ContactAuthIssuedFixture fixtu
         Assert.False(await database.Messages.AnyAsync(value => value.MessageContent == marker));
     }
 
+    /// <summary>Checks that an incorrect secret for an existing or absent client returns unauthorized without issuing tokens.</summary>
+    /// <param name="client">The service client identifier tested with an incorrect secret: contact-create or missing-client.</param>
+    /// <returns>A task that completes after verifying that an incorrect secret for an existing or absent client returns unauthorized without issuing tokens.</returns>
     [Theory]
     [InlineData("contact-create")]
     [InlineData("missing-client")]
@@ -104,9 +116,12 @@ public sealed class ContactAuthIssuedServiceTests(ContactAuthIssuedFixture fixtu
     }
 }
 
+/// <summary>Owns an ephemeral Auth issuer, signing key, production Contact host, and disposable PostgreSQL for machine-token acceptance.</summary>
 public sealed class ContactAuthIssuedFixture : IAsyncLifetime
 {
+    /// <summary>Defines the synthetic issuer trusted by both the ephemeral Auth process and the Contact test host.</summary>
     public const string Issuer = "https://contact-auth-proof.invalid";
+    /// <summary>Defines the synthetic audience required by the Contact host for Auth-issued proof tokens.</summary>
     public const string Audience = "contact-auth-proof";
     private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:18-alpine").Build();
     private readonly RSA rsa = RSA.Create(2048);
@@ -115,8 +130,11 @@ public sealed class ContactAuthIssuedFixture : IAsyncLifetime
     private HttpClient? issuer;
     private Timer? deadline;
     private int disposed;
+    /// <summary>Gets the production Contact application factory configured to trust the ephemeral Auth signing key.</summary>
     public WebApplicationFactory<Program> Contact { get; private set; } = null!;
 
+    /// <summary>Starts the disposable database and pinned Auth issuer, applies migrations, and configures the production Contact host.</summary>
+    /// <returns>A task that completes when the database, issuer endpoint, and Contact factory are ready.</returns>
     public async Task InitializeAsync()
     {
         try
@@ -187,20 +205,34 @@ public sealed class ContactAuthIssuedFixture : IAsyncLifetime
         catch { await DisposeAsync(); throw; }
     }
 
+    /// <summary>Creates a context connected to the fixture-owned PostgreSQL database.</summary>
+    /// <returns>A new caller-owned Contact database context using the disposable PostgreSQL connection.</returns>
     public ContactRequestDbContext Database() => new(new DbContextOptionsBuilder<ContactRequestDbContext>().UseNpgsql(postgres.GetConnectionString()).Options);
+    /// <summary>Submits service credentials to the actual pinned Auth login endpoint.</summary>
+    /// <param name="client">The service client identifier sent as ClientId in the login payload.</param>
+    /// <param name="suppliedSecret">The candidate client secret sent as ClientSecret to exercise successful or rejected authentication.</param>
+    /// <returns>A task whose result is the caller-owned HTTP response from the service login endpoint.</returns>
     public Task<HttpResponseMessage> LoginResponseAsync(string client, string suppliedSecret) => issuer!.PostAsJsonAsync("/auth/v1/service/login", new { ClientId = client, ClientSecret = suppliedSecret });
+    /// <summary>Authenticates a configured service client with the fixture secret and extracts its token response.</summary>
+    /// <param name="client">The configured service client identifier whose grant is requested from the actual Auth issuer.</param>
+    /// <returns>A task whose result is a cloned JSON token response after asserting successful authentication.</returns>
     public async Task<JsonElement> LoginAsync(string client)
     {
         using var response = await LoginResponseAsync(client, secret);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return (await response.Content.ReadFromJsonAsync<JsonElement>()).Clone();
     }
+    /// <summary>Creates a Contact HTTP client authorized with the access token returned by the actual Auth issuer.</summary>
+    /// <param name="wire">The successful service-login JSON response containing the accessToken to send as bearer authentication.</param>
+    /// <returns>A caller-owned HTTPS Contact client with redirects disabled and the issued bearer token installed.</returns>
     public HttpClient ContactClient(JsonElement wire)
     {
         var client = Contact.CreateClient(new() { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", wire.GetProperty("accessToken").GetString());
         return client;
     }
+    /// <summary>Disposes the deadline timer, Contact host, issuer client and process, ephemeral signing key, and PostgreSQL container.</summary>
+    /// <returns>A task that completes after fixture-owned issuer and database resources have been disposed.</returns>
     public async Task DisposeAsync()
     {
         if (Interlocked.Exchange(ref disposed, 1) != 0) return;

@@ -5,10 +5,15 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Legacy.Maliev.ContactService.Tests.Controllers;
 
+/// <summary>Checks original HTTP paging metadata and ordering against a thousand persisted contact requests without changing the stored rows.</summary>
+/// <param name="postgres">The shared PostgreSQL fixture providing database reset, connection settings, and fresh contexts for paging assertions.</param>
 [Collection("Contact literal payload")]
 public sealed class ContactSourcePaginationCardinalityHttpTests(ContactRuntimePostgresFixture postgres)
     : IClassFixture<ContactRuntimePostgresFixture>
 {
+    /// <summary>Checks that omitted page size returns all rows, explicit pages retain exact membership, and requests beyond the last page return not found.</summary>
+    /// <param name="route">The legacy Messages or versioned contact-requests collection path used for all paging requests.</param>
+    /// <returns>A task that completes after asserting page contents, totalRecords metadata, page-edge responses, and unchanged persisted contact rows.</returns>
     [Theory]
     [InlineData("/Messages")]
     [InlineData("/messages/v1/contact-requests")]
@@ -53,6 +58,9 @@ public sealed class ContactSourcePaginationCardinalityHttpTests(ContactRuntimePo
         Assert.Equal(before, JsonSerializer.Serialize(await after.Messages.AsNoTracking().OrderBy(row => row.Id).ToArrayAsync()));
     }
 
+    /// <summary>Checks descending HTTP pagination over explicit identifiers 1 through 1000, including exact first and last identifiers and unchanged row versions.</summary>
+    /// <param name="route">The legacy Messages or versioned contact-requests collection path used for descending-order requests.</param>
+    /// <returns>A task that completes after asserting exact descending identifiers, paging metadata, the beyond-last-page response, and unchanged stored rows including concurrency versions.</returns>
     [Theory]
     [InlineData("/Messages")]
     [InlineData("/messages/v1/contact-requests")]

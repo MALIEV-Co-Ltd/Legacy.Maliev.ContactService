@@ -6,8 +6,11 @@ using Moq;
 
 namespace Legacy.Maliev.ContactService.Tests.Controllers;
 
+/// <summary>Checks original controller null-body guards and versioned identifier-validation ordering without service calls.</summary>
 public sealed class ContactOriginalNullControllerTests
 {
+    /// <summary>Checks that null creation returns the original required-message response before calling the service.</summary>
+    /// <returns>A task that completes after verifying that null creation returns the original required-message response before calling the service.</returns>
     [Fact]
     public async Task NullCreate_PreservesOriginalBadRequestMessageWithoutServiceCalls()
     {
@@ -20,6 +23,9 @@ public sealed class ContactOriginalNullControllerTests
         service.VerifyNoOtherCalls();
     }
 
+    /// <summary>Checks that a legacy null update body returns the original required-message response before looking up the identifier.</summary>
+    /// <param name="messageId">The message identifier supplied with a null body to verify validation before lookup.</param>
+    /// <returns>A task that completes after verifying that a legacy null update body returns the original required-message response before looking up the identifier.</returns>
     [Theory]
     [InlineData(101)]
     [InlineData(int.MaxValue)]
@@ -34,6 +40,8 @@ public sealed class ContactOriginalNullControllerTests
         service.VerifyNoOtherCalls();
     }
 
+    /// <summary>Checks that a versioned nonpositive identifier returns its existing rejection before the null-body guard.</summary>
+    /// <returns>A task that completes after verifying that a versioned nonpositive identifier returns its existing rejection before the null-body guard.</returns>
     [Fact]
     public async Task VersionedNonpositiveIdentifier_PreservesExistingRejectionBeforeNullGuard()
     {

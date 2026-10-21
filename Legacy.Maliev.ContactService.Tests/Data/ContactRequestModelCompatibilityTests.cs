@@ -4,8 +4,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Legacy.Maliev.ContactService.Tests.Data;
 
+/// <summary>Checks retained Message table, identifier column, and contact-field mappings in the Entity Framework model.</summary>
 public sealed class ContactRequestModelCompatibilityTests
 {
+    /// <summary>Checks the legacy Message and ID mappings, 50-character name and email limits, and the mapped message-content property.</summary>
     [Fact]
     public void Model_maps_to_legacy_Message_table_and_ID_column()
     {

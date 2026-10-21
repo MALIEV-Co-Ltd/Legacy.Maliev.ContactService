@@ -5,8 +5,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Legacy.Maliev.ContactService.Tests.Data;
 
+/// <summary>Checks UTC wall-clock timestamp mappings and explicit UTC conversion in the timestamp migration.</summary>
 public sealed class ContactModelCompatibilityTests
 {
+    /// <summary>Checks that creation and modification timestamps use timestamp without time zone with a UTC SQL default.</summary>
     [Fact]
     public void Model_UsesUtcWallClockTimestampContract()
     {
@@ -24,6 +26,7 @@ public sealed class ContactModelCompatibilityTests
         }
     }
 
+    /// <summary>Checks that timestamp migration SQL drops existing defaults and explicitly interprets existing values as UTC.</summary>
     [Fact]
     public void TimestampMigration_ConvertsExistingValuesExplicitlyAsUtc()
     {

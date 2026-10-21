@@ -5,12 +5,17 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Legacy.Maliev.ContactService.Tests.Controllers;
 
+/// <summary>Serializes tests that mutate the shared disposable database while checking literal contact payloads.</summary>
 [CollectionDefinition("Contact literal payload", DisableParallelization = true)]
 public sealed class ContactLiteralPayloadCollection;
 
+/// <summary>Checks generated-model compatibility, literal payload round trips, and nullable creation-date ordering.</summary>
+/// <param name="postgres">The shared disposable PostgreSQL fixture holding synthetic contact messages for HTTP assertions.</param>
 [Collection("Contact literal payload")]
 public sealed class ContactLiteralPayloadHttpTests(ContactRuntimePostgresFixture postgres) : IClassFixture<ContactRuntimePostgresFixture>
 {
+    /// <summary>Checks actual EF scaffolding, generated compilation, and queries against a migrated synthetic contact message.</summary>
+    /// <returns>A task that completes after verifying actual EF scaffolding, generated compilation, and queries against a migrated synthetic contact message.</returns>
     [Fact]
     public async Task Scaffold_ActualEfPreviewBuildAndGeneratedQueriesPreserveMigratedOwnedMessage()
     {
@@ -31,6 +36,10 @@ public sealed class ContactLiteralPayloadHttpTests(ContactRuntimePostgresFixture
         await ContactScaffoldRuntimeProof.RunAsync(postgres, row.Id);
     }
 
+    /// <summary>Checks literal round trips for all seven fields, ignores forged identity and dates, and clears nullable fields on replacement.</summary>
+    /// <param name="route">The contact collection alias used for creation, detail reads, and replacement.</param>
+    /// <param name="value">The literal value assigned to every contact field: empty text, padded text, or Thai text.</param>
+    /// <returns>A task that completes after verifying literal round trips for all seven fields, ignores forged identity and dates, and clears nullable fields on replacement.</returns>
     [Theory]
     [InlineData("/Messages", "")]
     [InlineData("/Messages", "  Literal value  ")]
@@ -78,6 +87,10 @@ public sealed class ContactLiteralPayloadHttpTests(ContactRuntimePostgresFixture
         Assert.Equal(id, finalJson.RootElement.GetProperty("id").GetInt32());
     }
 
+    /// <summary>Checks that creation-date sorting preserves the source null placement across complete and single-item pages.</summary>
+    /// <param name="sort">The ascending or descending MessageCreatedDate sort enum name supplied in listing queries.</param>
+    /// <param name="descending">Whether dated messages appear newest first with the undated message last rather than first.</param>
+    /// <returns>A task that completes after verifying that creation-date sorting preserves the source null placement across complete and single-item pages.</returns>
     [Theory]
     [InlineData("MessageCreatedDate_Ascending", false)]
     [InlineData("MessageCreatedDate_Descending", true)]
