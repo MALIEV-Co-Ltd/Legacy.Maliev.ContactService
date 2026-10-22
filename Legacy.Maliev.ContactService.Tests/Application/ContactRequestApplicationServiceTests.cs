@@ -6,8 +6,11 @@ using Microsoft.Extensions.Time.Testing;
 
 namespace Legacy.Maliev.ContactService.Tests.Application;
 
+/// <summary>Checks message-field mapping, server timestamps, cache invalidation, and filtered application-service paging.</summary>
 public sealed class ContactRequestApplicationServiceTests
 {
+    /// <summary>Checks that message creation preserves all seven contact fields, assigns the controlled server time, and invalidates the cache.</summary>
+    /// <returns>A task that completes after verifying that message creation preserves all seven contact fields, assigns the controlled server time, and invalidates the cache.</returns>
     [Fact]
     public async Task CreateAsync_preserves_legacy_message_fields_and_timestamps()
     {
@@ -31,6 +34,8 @@ public sealed class ContactRequestApplicationServiceTests
         Assert.True(cache.Invalidated);
     }
 
+    /// <summary>Checks filtered message projection, descending identifier sorting, and single-page metadata through the application service.</summary>
+    /// <returns>A task that completes after verifying filtered message projection, descending identifier sorting, and single-page metadata through the application service.</returns>
     [Fact]
     public async Task GetPaginatedAsync_preserves_search_sort_and_not_found_boundaries()
     {

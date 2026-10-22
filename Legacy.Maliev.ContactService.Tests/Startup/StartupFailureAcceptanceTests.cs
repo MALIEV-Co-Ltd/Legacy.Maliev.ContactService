@@ -7,14 +7,19 @@ using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace Legacy.Maliev.ContactService.Tests.Startup;
 
+/// <summary>Serializes tests that intercept the Contact entrypoint and mutate process-wide startup state.</summary>
 [CollectionDefinition("Contact startup state", DisableParallelization = true)]
 public sealed class StartupCollection;
 
+/// <summary>Verifies private startup failure reporting, normal host interception, and unchanged host-abort behavior.</summary>
 [Collection("Contact startup state")]
 public sealed class StartupFailureAcceptanceTests
 {
     private const string Sentinel = "private-startup-test-sentinel";
 
+    /// <summary>Checks that actual API startup failures emit redacted private diagnostics and exit with code one.</summary>
+    /// <param name="phase">The malformed configuration, missing-root, or host-start failure scenario applied to the actual API process.</param>
+    /// <returns>A task that completes when the actual startup process exits with code one and its private diagnostic assertions finish.</returns>
     [Theory]
     [InlineData("malformed")]
     [InlineData("missing-root")]
@@ -92,6 +97,9 @@ public sealed class StartupFailureAcceptanceTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
+    /// <summary>Checks that in-process configuration failures are contained and reported privately while setting exit code one.</summary>
+    /// <param name="phase">The malformed configuration or missing-root scenario applied when invoking the actual API entrypoint in-process.</param>
+    /// <returns>A task that completes when in-process startup failure reporting and exit-code assertions finish and process-wide state is restored.</returns>
     [Theory]
     [InlineData("malformed")]
     [InlineData("missing-root")]
@@ -154,6 +162,8 @@ public sealed class StartupFailureAcceptanceTests
             ["Observability:RuntimeMetricsEnabled"] = "false"
         };
     }
+    /// <summary>Checks normal production host interception, public liveness, protected contact reads, and preservation of the existing exit code.</summary>
+    /// <returns>A task that completes when normal host liveness, authorization, and exit-code preservation assertions finish.</returns>
     [Fact]
     public async Task Normal_production_host_remains_interceptable_and_preserves_exit_code()
     {
@@ -183,6 +193,8 @@ public sealed class StartupFailureAcceptanceTests
         }
         finally { Environment.ExitCode = previous; }
     }
+    /// <summary>Checks that entrypoint host abort escapes unchanged without startup-failure output or exit-code mutation.</summary>
+    /// <returns>A task that completes when the intercepted host abort is rethrown unchanged and process-wide startup state is restored.</returns>
     [Fact]
     public async Task Actual_entrypoint_rethrows_host_abort_without_emitting_private_failure_or_changing_exit_code()
     {

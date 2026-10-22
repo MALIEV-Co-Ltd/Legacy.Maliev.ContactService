@@ -6,12 +6,18 @@ using YamlDotNet.RepresentationModel;
 
 namespace Legacy.Maliev.ContactService.Tests.Workflows;
 
+/// <summary>Checks build workflow custody, immutable dependencies, least-privilege permissions, and evidence preservation.</summary>
 public sealed class WorkflowContractTests
 {
     private const string BindingStep = "      - name: Bind existing validation to owned phase admission\n"
         + "        shell: bash\n"
-        + "        run: echo \"BASH_ENV=$GITHUB_WORKSPACE/tooling/contact-hosted-dotnet.sh\" >> \"$GITHUB_ENV\"\n";
+        + "        run: |\n"
+        + "          python3 -B tooling/test-contact-hosted-custody.py\n"
+        + "          echo \"BASH_ENV=$GITHUB_WORKSPACE/tooling/contact-hosted-dotnet.sh\" >> \"$GITHUB_ENV\"\n";
 
+    /// <summary>Checks rejection of mutations to hosted phase custody, runner limits, and validation evidence boundaries.</summary>
+    /// <param name="original">The reviewed workflow fragment locating the custody binding, runner or timeout setting, or evidence boundary to mutate.</param>
+    /// <param name="replacement">The altered or removed workflow fragment that the structural validator must reject.</param>
     [Theory]
     [InlineData("Bind existing validation to owned phase admission", "Bind unreviewed phase admission")]
     [InlineData("shell: bash\n        run:", "shell: pwsh\n        run:")]
@@ -30,18 +36,21 @@ public sealed class WorkflowContractTests
         AssertMutationRejected(original, replacement);
     }
 
+    /// <summary>Checks rejection when the owned phase-admission binding step is missing.</summary>
     [Fact]
     public void BuildAndTest_RejectsMissingOwnedCustodyBinding()
     {
         AssertMutationRejected(BindingStep, string.Empty);
     }
 
+    /// <summary>Checks rejection when the owned phase-admission binding step appears more than once.</summary>
     [Fact]
     public void BuildAndTest_RejectsDuplicateOwnedCustodyBinding()
     {
         AssertMutationRejected(BindingStep, BindingStep + BindingStep);
     }
 
+    /// <summary>Checks rejection when the owned phase-admission binding occurs after shared validation.</summary>
     [Fact]
     public void BuildAndTest_RejectsOwnedCustodyBindingAfterValidation()
     {
@@ -57,12 +66,24 @@ public sealed class WorkflowContractTests
     private static readonly string ApiProject = File.ReadAllText(
         FindRepositoryFile("Legacy.Maliev.ContactService.Api", "Legacy.Maliev.ContactService.Api.csproj"));
 
+    private static void BuildAndTest_RejectsPreviousUploadArtifactPin()
+    {
+        var previousPin = Workflow.Replace("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", StringComparison.Ordinal);
+        Assert.NotEqual(Workflow, previousPin);
+        Assert.Throws<InvalidOperationException>(() => WorkflowContractValidator.Validate(previousPin));
+    }
+
+    /// <summary>Checks the maintained build workflow structure and rejection of the previous artifact-upload action pin.</summary>
     [Fact]
     public void BuildAndTest_SatisfiesStructuralContract()
     {
+        BuildAndTest_RejectsPreviousUploadArtifactPin();
         WorkflowContractValidator.Validate(Workflow);
     }
 
+    /// <summary>Checks rejection of changes to the scaffold guard's shell, script, or evidence destination.</summary>
+    /// <param name="original">The reviewed scaffold guard shell, script path, or evidence-output path located in the existing workflow.</param>
+    /// <param name="replacement">The altered shell, script path, or evidence destination supplied to verify structural rejection.</param>
     [Theory]
     [InlineData("shell: pwsh", "shell: bash")]
     [InlineData("./tooling/Test-ContactScaffoldContract.ps1", "./tooling/UnreviewedScaffold.ps1")]
@@ -72,6 +93,7 @@ public sealed class WorkflowContractTests
         AssertMutationRejected(original, replacement);
     }
 
+    /// <summary>Checks that a hash in a comment cannot authorize a shared validation action referenced by its main branch.</summary>
     [Fact]
     public void BuildAndTest_RejectsSharedActionMainWithPinnedShaComment()
     {
@@ -80,6 +102,7 @@ public sealed class WorkflowContractTests
             "MALIEV-Co-Ltd/Legacy.Maliev.Workflows/actions/dotnet-validate@main # e3a6093324a24968876782153286f52db8b29fd8");
     }
 
+    /// <summary>Checks that a commented dependency hash cannot satisfy immutable checkout pinning.</summary>
     [Fact]
     public void BuildAndTest_RejectsCommentedDependencySha()
     {
@@ -88,6 +111,7 @@ public sealed class WorkflowContractTests
             "ref: main # c40a7f82cea347b949444dcd7fb730f2b8dc3c0e");
     }
 
+    /// <summary>Checks legacy ServiceDefaults references and opt-in isolation of EF design-time dependencies from normal API builds.</summary>
     [Fact]
     public void ApiProject_UsesOnlyLegacyServiceDefaults()
     {
@@ -106,6 +130,7 @@ public sealed class WorkflowContractTests
 
     }
 
+    /// <summary>Checks rejection of job-level permissions that escalate beyond read-only validation authority.</summary>
     [Fact]
     public void BuildAndTest_RejectsJobPermissionEscalation()
     {
@@ -114,6 +139,7 @@ public sealed class WorkflowContractTests
             "  validate:\n    permissions:\n      contents: write\n    name: validate");
     }
 
+    /// <summary>Checks rejection of secrets expressions anywhere in the workflow, including comments.</summary>
     [Fact]
     public void BuildAndTest_RejectsSecretReferenceAnywhere()
     {
@@ -122,6 +148,8 @@ public sealed class WorkflowContractTests
         Assert.Throws<InvalidOperationException>(() => WorkflowContractValidator.Validate(mutated));
     }
 
+    /// <summary>Checks rejection of secret expressions injected into the validation job environment.</summary>
+    /// <param name="expression">The dotted or bracketed GitHub secrets expression injected into a job environment value.</param>
     [Theory]
     [InlineData("${{secrets.X}}")]
     [InlineData("${{ secrets['X'] }}")]
@@ -132,6 +160,7 @@ public sealed class WorkflowContractTests
             $"    env:\n      MalievWorkspaceRoot: ${{{{ github.workspace }}}}/.dependencies\n      REVIEW_TOKEN: {expression}");
     }
 
+    /// <summary>Checks rejection of duplicated restore commands even when extra whitespace obscures their tokens.</summary>
     [Fact]
     public void BuildAndTest_RejectsWhitespaceObfuscatedRestoreCommand()
     {
@@ -140,6 +169,7 @@ public sealed class WorkflowContractTests
             "          solution: Legacy.Maliev.ContactService.slnx\n      - run: dotnet  restore Legacy.Maliev.ContactService.slnx");
     }
 
+    /// <summary>Checks rejection when the shared validation action lacks its explicit local-dependency opt-in.</summary>
     [Fact]
     public void BuildAndTest_RejectsMissingLocalDependencyOptIn()
     {
@@ -148,6 +178,7 @@ public sealed class WorkflowContractTests
             string.Empty);
     }
 
+    /// <summary>Checks rejection of reserved GitHub Actions environment overrides on validation action steps.</summary>
     [Fact]
     public void BuildAndTest_RejectsReservedGitHubActionsOverride()
     {
@@ -256,7 +287,7 @@ internal static partial class WorkflowContractValidator
         }
         RequireScalarValue(binding, "name", "Bind existing validation to owned phase admission");
         RequireScalarValue(binding, "shell", "bash");
-        RequireScalarValue(binding, "run", "echo \"BASH_ENV=$GITHUB_WORKSPACE/tooling/contact-hosted-dotnet.sh\" >> \"$GITHUB_ENV\"");
+        RequireScalarValue(binding, "run", "python3 -B tooling/test-contact-hosted-custody.py\necho \"BASH_ENV=$GITHUB_WORKSPACE/tooling/contact-hosted-dotnet.sh\" >> \"$GITHUB_ENV\"\n");
 
         var scaffold = RequireMapping(steps.Children[5], "scaffold guard");
         if (scaffold.Children.Count != 3)
@@ -283,7 +314,7 @@ internal static partial class WorkflowContractValidator
 
         RequireScalarValue(evidence, "name", "Preserve validation evidence");
         RequireScalarValue(evidence, "if", "always()");
-        RequireScalarValue(evidence, "uses", "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02");
+        RequireScalarValue(evidence, "uses", "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a");
         var evidenceInputs = RequireMapping(evidence, "with");
         if (evidenceInputs.Children.Count != 4)
         {

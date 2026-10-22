@@ -17,8 +17,11 @@ using Microsoft.Extensions.Options;
 
 namespace Legacy.Maliev.ContactService.Tests.Controllers;
 
+/// <summary>Checks that authenticated contact-service failures expose an incident identifier while keeping contact data and literal route identifiers out of responses and logs.</summary>
 public sealed class MessageFailureBoundaryTests
 {
+    /// <summary>Checks a failing authenticated message read for a sanitized 500 response, retained correlation identifier, and an incident log using the route template.</summary>
+    /// <returns>A task that completes after asserting response and incident-log correlation and the absence of sensitive contact values and literal message identifiers.</returns>
     [Fact]
     public async Task AuthenticatedMessageFailure_UsesRedactedRouteAndIncidentWithoutContactData()
     {

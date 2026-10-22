@@ -3,8 +3,10 @@ using YamlDotNet.RepresentationModel;
 
 namespace Legacy.Maliev.ContactService.Tests;
 
+/// <summary>Checks immutable publication dependencies, deployment gating, and least-privilege workflow permissions.</summary>
 public sealed class PublishWorkflowPermissionContractTests
 {
+    /// <summary>Checks the reviewed reusable publisher pin, closed deployment gate, and pinned dependency inputs.</summary>
     [Fact]
     public void PublishWorkflow_UsesReviewedExactMainValidationGuard()
     {
@@ -24,6 +26,7 @@ public sealed class PublishWorkflowPermissionContractTests
             ((YamlScalarNode)inputs.Children[new YamlScalarNode("compatibility-contracts-ref")]).Value);
     }
 
+    /// <summary>Checks read-only workflow permissions and the exact permissions required locally by the publish job.</summary>
     [Fact]
     public void PublishWorkflow_GrantsOnlyRequiredJobLocalPermissions()
     {
@@ -48,6 +51,7 @@ public sealed class PublishWorkflowPermissionContractTests
         return Assert.IsType<YamlMappingNode>(Assert.Single(stream.Documents).RootNode);
     }
 
+    /// <summary>Checks that OIDC write authority appears only on publication jobs and never in the workflow header or deployment gate.</summary>
     [Fact]
     public void PublishWorkflow_ScopesOidcToPublishJobs()
     {

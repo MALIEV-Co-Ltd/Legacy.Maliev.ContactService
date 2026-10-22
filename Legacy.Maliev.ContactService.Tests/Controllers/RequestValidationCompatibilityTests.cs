@@ -9,8 +9,10 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Legacy.Maliev.ContactService.Tests.Controllers;
 
+/// <summary>Checks that the contact upsert record remains compatible with MVC data-annotation validation.</summary>
 public sealed class RequestValidationCompatibilityTests
 {
+    /// <summary>Checks that MVC can validate a populated contact upsert record without throwing a record-metadata validation exception.</summary>
     [Fact]
     public void Upsert_request_is_accepted_by_the_Mvc_record_validation_pipeline()
     {

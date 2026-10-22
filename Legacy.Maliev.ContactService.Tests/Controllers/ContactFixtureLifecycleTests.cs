@@ -3,8 +3,11 @@ using System.Collections.ObjectModel;
 
 namespace Legacy.Maliev.ContactService.Tests.Controllers;
 
+/// <summary>Checks fixture task joining, idempotent disposal, receipt identity, and preservation of primary failures during cleanup.</summary>
 public sealed class ContactFixtureLifecycleTests
 {
+    /// <summary>Checks that a captured container identity remains available for receipts after its resource getter becomes unusable.</summary>
+    /// <returns>A task that completes after verifying that a captured container identity remains available for receipts after its resource getter becomes unusable.</returns>
     [Fact]
     public async Task CapturedIdentity_SurvivesDisposedGetterAndReceiptWriting()
     {
@@ -24,6 +27,8 @@ public sealed class ContactFixtureLifecycleTests
         Assert.Equal(ReceiptResource.ActualId, identity.ContainerId);
     }
 
+    /// <summary>Checks that disposal failure preserves the primary migration failure and records the already captured container identity.</summary>
+    /// <returns>A task that completes after verifying that disposal failure preserves the primary migration failure and records the already captured container identity.</returns>
     [Fact]
     public async Task CapturedIdentity_DisposalFaultIsRecordedWithoutReplacingPrimary()
     {
@@ -48,6 +53,8 @@ public sealed class ContactFixtureLifecycleTests
         Assert.Equal(ReceiptResource.ActualId, identity.ContainerId);
     }
 
+    /// <summary>Checks that failed startup leaves receipt identity unknown without probing an unavailable resource getter.</summary>
+    /// <returns>A task that completes after verifying that failed startup leaves receipt identity unknown without probing an unavailable resource getter.</returns>
     [Fact]
     public async Task UnsuccessfulStartup_LeavesReceiptIdentityUnknownWithoutGetterProbe()
     {
@@ -93,6 +100,9 @@ public sealed class ContactFixtureLifecycleTests
         }
     }
 
+    /// <summary>Checks that immutable exception data and a throwing observer cannot replace the primary failure or skip cleanup.</summary>
+    /// <param name="throwingData">Whether the primary exception Data getter throws rather than returning a read-only diagnostic dictionary.</param>
+    /// <returns>A task that completes after verifying that immutable exception data and a throwing observer cannot replace the primary failure or skip cleanup.</returns>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -114,6 +124,8 @@ public sealed class ContactFixtureLifecycleTests
         Assert.Equal(1, disposals);
     }
 
+    /// <summary>Checks that a throwing failure observer cannot skip joining the real startup task before disposal.</summary>
+    /// <returns>A task that completes after verifying that a throwing failure observer cannot skip joining the real startup task before disposal.</returns>
     [Fact]
     public async Task ThrowingFailureObserver_CannotSkipActualTaskJoin()
     {
@@ -156,6 +168,10 @@ public sealed class ContactFixtureLifecycleTests
         }
     }
 
+    /// <summary>Checks that concurrent early disposal waits for initialization and shares exactly one cleanup task.</summary>
+    /// <param name="migration">Whether the pending operation is database migration rather than container startup.</param>
+    /// <param name="lateFault">Whether the pending operation faults after disposal begins rather than completing successfully.</param>
+    /// <returns>A task that completes after verifying that concurrent early disposal waits for initialization and shares exactly one cleanup task.</returns>
     [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
@@ -206,6 +222,8 @@ public sealed class ContactFixtureLifecycleTests
         }
     }
 
+    /// <summary>Checks that disposing an uninitialized fixture prevents subsequent startup and performs cleanup once.</summary>
+    /// <returns>A task that completes after verifying that disposing an uninitialized fixture prevents subsequent startup and performs cleanup once.</returns>
     [Fact]
     public async Task DisposalBeforeInitialization_PreventsLaterStartup()
     {
@@ -219,6 +237,8 @@ public sealed class ContactFixtureLifecycleTests
         Assert.Equal(1, disposals);
     }
 
+    /// <summary>Checks that concurrent initialization calls retain the same task and start the underlying resource once.</summary>
+    /// <returns>A task that completes after verifying that concurrent initialization calls retain the same task and start the underlying resource once.</returns>
     [Fact]
     public async Task ConcurrentInitialization_SharesOneRetainedTask()
     {
@@ -245,6 +265,8 @@ public sealed class ContactFixtureLifecycleTests
         }
     }
 
+    /// <summary>Checks that repeated disposal after successful initialization releases the resource exactly once.</summary>
+    /// <returns>A task that completes after verifying that repeated disposal after successful initialization releases the resource exactly once.</returns>
     [Fact]
     public async Task SuccessfulLifecycle_DisposesExactlyOnce()
     {
@@ -257,6 +279,9 @@ public sealed class ContactFixtureLifecycleTests
         Assert.Equal(1, disposals);
     }
 
+    /// <summary>Checks that startup or migration failure triggers one disposal while preserving the original exception.</summary>
+    /// <param name="migrationFails">Whether the synthetic primary failure occurs during migration rather than resource startup.</param>
+    /// <returns>A task that completes after verifying that startup or migration failure triggers one disposal while preserving the original exception.</returns>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -273,6 +298,9 @@ public sealed class ContactFixtureLifecycleTests
         Assert.Equal(1, disposals);
     }
 
+    /// <summary>Checks that cancellation waits for an operation that ignores its token before beginning cleanup.</summary>
+    /// <param name="migration">Whether the cancellation-ignoring task represents migration rather than resource startup.</param>
+    /// <returns>A task that completes after verifying that cancellation waits for an operation that ignores its token before beginning cleanup.</returns>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -311,6 +339,8 @@ public sealed class ContactFixtureLifecycleTests
         }
     }
 
+    /// <summary>Checks that a task fault observed after cancellation is recorded without replacing the cancellation exception.</summary>
+    /// <returns>A task that completes after verifying that a task fault observed after cancellation is recorded without replacing the cancellation exception.</returns>
     [Fact]
     public async Task LateFaultAfterCancellation_IsObservedWithoutReplacingCancellation()
     {
@@ -347,6 +377,8 @@ public sealed class ContactFixtureLifecycleTests
         }
     }
 
+    /// <summary>Checks that a cleanup exception is attached to the primary initialization failure and remains observable on disposal.</summary>
+    /// <returns>A task that completes after verifying that a cleanup exception is attached to the primary initialization failure and remains observable on disposal.</returns>
     [Fact]
     public async Task CleanupFailure_IsRecordedWithoutReplacingPrimary()
     {

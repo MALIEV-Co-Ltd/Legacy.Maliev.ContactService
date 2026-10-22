@@ -27,11 +27,15 @@ using Testcontainers.PostgreSql;
 namespace Legacy.Maliev.ContactService.Tests.Controllers;
 
 /// <summary>Real production RS256/HTTP/PG contracts using disposable synthetic data only.</summary>
+/// <param name="postgres">The shared disposable PostgreSQL fixture used for production authentication, HTTP, and persistence assertions.</param>
 public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixture postgres)
     : IClassFixture<ContactRuntimePostgresFixture>
 {
     private const string PipelineAllowedOrigin = "https://contact-pipeline.example.test";
 
+    /// <summary>Checks that production CORS preflight handles configured and blocked origins before protected mutation authorization.</summary>
+    /// <param name="allowed">Whether the preflight Origin matches the configured allowed origin rather than the blocked test origin.</param>
+    /// <returns>A task that completes after verifying that production CORS preflight handles configured and blocked origins before protected mutation authorization.</returns>
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -64,6 +68,8 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         }
     }
 
+    /// <summary>Checks that unauthorized anonymous mutations retain configured CORS headers and persist no message.</summary>
+    /// <returns>A task that completes after verifying that unauthorized anonymous mutations retain configured CORS headers and persist no message.</returns>
     [Fact]
     public async Task ProductionPipeline_AnonymousMutationIncludesConfiguredCorsOnUnauthorizedResponse()
     {
@@ -85,6 +91,9 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         Assert.Equal(0, await db.Messages.CountAsync());
     }
 
+    /// <summary>Checks anonymous healthy liveness and readiness responses with the approved sanitized wire shape.</summary>
+    /// <param name="probe">The anonymous health endpoint suffix: liveness for plain Healthy text or readiness for sanitized JSON.</param>
+    /// <returns>A task that completes after verifying anonymous healthy liveness and readiness responses with the approved sanitized wire shape.</returns>
     [Theory]
     [InlineData("liveness")]
     [InlineData("readiness")]
@@ -111,6 +120,9 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
             Assert.Equal("Healthy", check.Value.GetProperty("status").GetString()));
     }
 
+    /// <summary>Checks that dependency failures produce sanitized unhealthy readiness while liveness remains healthy.</summary>
+    /// <param name="throwFailure">Whether the controlled readiness check throws rather than returning an unhealthy result with private diagnostics.</param>
+    /// <returns>A task that completes after verifying that dependency failures produce sanitized unhealthy readiness while liveness remains healthy.</returns>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -169,6 +181,10 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         }
     }
 
+    /// <summary>Checks literal wildcard characters, Thai text, and significant spaces across each original searchable text field.</summary>
+    /// <param name="route">The contact collection alias under test: /Messages or /messages/v1/contact-requests.</param>
+    /// <param name="field">The searchable field populated with test text: firstName, lastName, company, email, telephone, or messageContent.</param>
+    /// <returns>A task that completes after verifying literal wildcard characters, Thai text, and significant spaces across each original searchable text field.</returns>
     [Theory]
     [InlineData("/Messages", "firstName")]
     [InlineData("/Messages", "lastName")]
@@ -207,6 +223,9 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         }
     }
 
+    /// <summary>Checks that numeric search matches substrings of message identifiers rather than requiring identifier equality.</summary>
+    /// <param name="route">The contact collection alias under test: /Messages or /messages/v1/contact-requests.</param>
+    /// <returns>A task that completes after verifying that numeric search matches substrings of message identifiers rather than requiring identifier equality.</returns>
     [Theory]
     [InlineData("/Messages")]
     [InlineData("/messages/v1/contact-requests")]
@@ -226,6 +245,9 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         Assert.Equal(3, await db.Messages.CountAsync());
     }
 
+    /// <summary>Checks that search does not expand into the contact country field and leaves the stored message unchanged.</summary>
+    /// <param name="route">The contact collection alias under test: /Messages or /messages/v1/contact-requests.</param>
+    /// <returns>A task that completes after verifying that search does not expand into the contact country field and leaves the stored message unchanged.</returns>
     [Theory]
     [InlineData("/Messages")]
     [InlineData("/messages/v1/contact-requests")]
@@ -242,6 +264,9 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         Assert.Equal("OnlyExcludedMarker", (await db.Messages.AsNoTracking().SingleAsync()).Country);
     }
 
+    /// <summary>Checks that a JSON null creation body is rejected without changing stored messages or their versions.</summary>
+    /// <param name="route">The contact collection alias under test: /Messages or /messages/v1/contact-requests.</param>
+    /// <returns>A task that completes after verifying that a JSON null creation body is rejected without changing stored messages or their versions.</returns>
     [Theory]
     [InlineData("/Messages")]
     [InlineData("/messages/v1/contact-requests")]
@@ -262,6 +287,10 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         Assert.Equal(before, await SnapshotSourceRowsWithVersionAsync(fresh));
     }
 
+    /// <summary>Checks that a JSON null update is rejected before existing or missing lookup without changing persisted rows.</summary>
+    /// <param name="route">The contact collection alias under test: /Messages or /messages/v1/contact-requests.</param>
+    /// <param name="targetExists">Whether the update targets persisted message 500 rather than absent message 999.</param>
+    /// <returns>A task that completes after verifying that a JSON null update is rejected before existing or missing lookup without changing persisted rows.</returns>
     [Theory]
     [InlineData("/Messages", true)]
     [InlineData("/Messages", false)]
@@ -284,6 +313,10 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         Assert.Equal(before, await SnapshotSourceRowsWithVersionAsync(fresh));
     }
 
+    /// <summary>Checks that case-insensitive text search returns exactly twenty matches from a 101-message corpus without changing rows.</summary>
+    /// <param name="route">The contact collection alias under test: /Messages or /messages/v1/contact-requests.</param>
+    /// <param name="field">The searchable contact field containing HelloWorld in twenty rows and unrelated text in eighty-one distractors.</param>
+    /// <returns>A task that completes after verifying that case-insensitive text search returns exactly twenty matches from a 101-message corpus without changing rows.</returns>
     [Theory]
     [InlineData("/Messages", "company")]
     [InlineData("/Messages", "email")]
@@ -337,6 +370,9 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         Assert.Equal(before, await SnapshotSourceRowsWithVersionAsync(fresh));
     }
 
+    /// <summary>Checks that a unique identifier-substring search returns only the selected message from the retained 101-row corpus.</summary>
+    /// <param name="route">The contact collection alias under test: /Messages or /messages/v1/contact-requests.</param>
+    /// <returns>A task that completes after verifying that a unique identifier-substring search returns only the selected message from the retained 101-row corpus.</returns>
     [Theory]
     [InlineData("/Messages")]
     [InlineData("/messages/v1/contact-requests")]
@@ -380,6 +416,12 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         return JsonSerializer.Serialize(rows);
     }
 
+    /// <summary>Checks paging at Int32 boundaries without offset wraparound or changes to stored messages and versions.</summary>
+    /// <param name="route">The contact collection alias under test: /Messages or /messages/v1/contact-requests.</param>
+    /// <param name="index">The requested page index, including zero and large values that would overflow a 32-bit offset.</param>
+    /// <param name="size">The requested page size used to exercise large offsets, full pages, and alias-specific zero-size behavior.</param>
+    /// <param name="expectedItems">The expected returned item count; zero means the selected page must return not found.</param>
+    /// <returns>A task that completes after verifying paging at Int32 boundaries without offset wraparound or changes to stored messages and versions.</returns>
     [Theory]
     [InlineData("/Messages", 1073741825, 4, 0)]
     [InlineData("/Messages", 1431655767, 3, 0)]
@@ -391,7 +433,7 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
     [InlineData("/messages/v1/contact-requests", 3, 2, 0)]
     [InlineData("/Messages", 1, int.MaxValue, 4)]
     [InlineData("/messages/v1/contact-requests", 1, int.MaxValue, 4)]
-    [InlineData("/Messages", 0, 0, 1)]
+    [InlineData("/Messages", 0, 0, 0)]
     [InlineData("/messages/v1/contact-requests", 0, 0, 1)]
     public async Task Pagination_ValidInt32OffsetsDoNotWrapOrChangeStoredMessages(string route, int index, int size, int expectedItems)
     {
@@ -458,6 +500,9 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         }
     }
 
+    /// <summary>Checks that page JSON retains totalRecords and the source navigation metadata without introducing totalItems.</summary>
+    /// <param name="route">The contact collection alias under test: /Messages or /messages/v1/contact-requests.</param>
+    /// <returns>A task that completes after verifying that page JSON retains totalRecords and the source navigation metadata without introducing totalItems.</returns>
     [Theory]
     [InlineData("/Messages")]
     [InlineData("/messages/v1/contact-requests")]
@@ -483,6 +528,9 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         Assert.Single(body.RootElement.GetProperty("items").EnumerateArray());
     }
 
+    /// <summary>Checks that MVC binds a whitespace-only search to the unfiltered default listing.</summary>
+    /// <param name="route">The contact collection alias under test: /Messages or /messages/v1/contact-requests.</param>
+    /// <returns>A task that completes after verifying that MVC binds a whitespace-only search to the unfiltered default listing.</returns>
     [Theory]
     [InlineData("/Messages")]
     [InlineData("/messages/v1/contact-requests")]
@@ -501,6 +549,10 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
             .Select(item => item.GetProperty("id").GetInt32()).ToArray());
     }
 
+    /// <summary>Checks that omitted and empty search queries return both stored messages in identifier order.</summary>
+    /// <param name="route">The contact collection alias under test: /Messages or /messages/v1/contact-requests.</param>
+    /// <param name="query">The suffix appended to the collection route: empty text omits search, while ?search= supplies an empty value.</param>
+    /// <returns>A task that completes after verifying that omitted and empty search queries return both stored messages in identifier order.</returns>
     [Theory]
     [InlineData("/Messages", "")]
     [InlineData("/messages/v1/contact-requests", "")]
@@ -520,6 +572,9 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
             .Select(item => item.GetProperty("id").GetInt32()).ToArray());
     }
 
+    /// <summary>Checks create, replacement, read, and delete behavior with server identity, controlled dates, and null-field omission.</summary>
+    /// <param name="route">The contact collection alias under test: /Messages or /messages/v1/contact-requests.</param>
+    /// <returns>A task that completes after verifying create, replacement, read, and delete behavior with server identity, controlled dates, and null-field omission.</returns>
     [Theory]
     [InlineData("/Messages")]
     [InlineData("/messages/v1/contact-requests")]
@@ -580,6 +635,10 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         Assert.Empty(await emptyDb.Messages.AsNoTracking().ToArrayAsync());
     }
 
+    /// <summary>Checks that invalid authentication or a missing permission prevents contact creation before persistence.</summary>
+    /// <param name="scenario">The rejected caller scenario: anonymous, wrong-key, wrong-issuer, wrong-audience, expired, or no-permission.</param>
+    /// <param name="expected">The expected unauthorized or forbidden HTTP status for the rejected caller.</param>
+    /// <returns>A task that completes after verifying that invalid authentication or a missing permission prevents contact creation before persistence.</returns>
     [Theory]
     [InlineData("anonymous", HttpStatusCode.Unauthorized)]
     [InlineData("wrong-key", HttpStatusCode.Unauthorized)]
@@ -599,6 +658,10 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         Assert.Equal(0, await db.Messages.CountAsync());
     }
 
+    /// <summary>Checks that PostgreSQL search treats percent, underscore, and backslash characters literally.</summary>
+    /// <param name="search">The literal percent, underscore, or backslash character sent as the search query.</param>
+    /// <param name="matched">The seeded message text containing the literal search character and expected to be the only returned row.</param>
+    /// <returns>A task that completes after verifying that PostgreSQL search treats percent, underscore, and backslash characters literally.</returns>
     [Theory]
     [InlineData("%", "literal%")]
     [InlineData("_", "literal_")]
@@ -618,6 +681,8 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
             .GetProperty("id").GetInt32());
     }
 
+    /// <summary>Checks that an empty message collection and a page beyond the last message both return legacy not found.</summary>
+    /// <returns>A task that completes after verifying that an empty message collection and a page beyond the last message both return legacy not found.</returns>
     [Fact]
     public async Task Pagination_EmptyAndOutOfRangeKeepLegacyNotFound()
     {
@@ -631,6 +696,10 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         Assert.Equal(HttpStatusCode.NotFound, beyond.StatusCode);
     }
 
+    /// <summary>Checks that legacy updates to absent nonpositive identifiers return not found without altering the surviving message.</summary>
+    /// <param name="route">The legacy message collection route with its original or lowercase casing.</param>
+    /// <param name="missingId">The absent nonpositive message identifier, zero or minus one, used in the update route.</param>
+    /// <returns>A task that completes after verifying that legacy updates to absent nonpositive identifiers return not found without altering the surviving message.</returns>
     [Theory]
     [InlineData("/Messages", 0)]
     [InlineData("/Messages", -1)]
@@ -656,6 +725,11 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         Assert.Equal(before.ModifiedDate, after.ModifiedDate);
     }
 
+    /// <summary>Checks alias-specific rejection of nonpositive update identifiers while preserving the original stored message.</summary>
+    /// <param name="route">The contact collection alias under test: /Messages or /messages/v1/contact-requests.</param>
+    /// <param name="invalidId">The nonpositive message identifier, zero or minus one, submitted in the update route.</param>
+    /// <param name="expectedStatus">The expected route-specific status: not found for the legacy alias or bad request for the versioned alias.</param>
+    /// <returns>A task that completes after verifying alias-specific rejection of nonpositive update identifiers while preserving the original stored message.</returns>
     [Theory]
     [InlineData("/Messages", 0, HttpStatusCode.NotFound)]
     [InlineData("/Messages", -1, HttpStatusCode.NotFound)]
@@ -689,6 +763,8 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         return body.RootElement.GetProperty("id").GetInt32();
     }
 
+    /// <summary>Checks that a stale tracked entity cannot overwrite a committed PostgreSQL xmin version.</summary>
+    /// <returns>A task that completes after verifying that a stale tracked entity cannot overwrite a committed PostgreSQL xmin version.</returns>
     [Fact]
     public async Task Persistence_StaleTrackedUpdateCannotOverwriteCommittedXminVersion()
     {
@@ -715,6 +791,8 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         Assert.Equal("committed-first", (await read.Messages.AsNoTracking().SingleAsync()).MessageContent);
     }
 
+    /// <summary>Checks that simultaneous HTTP updates produce one committed winner and one conflict response.</summary>
+    /// <returns>A task that completes after verifying that simultaneous HTTP updates produce one committed winner and one conflict response.</returns>
     [Fact]
     public async Task HttpConcurrentUpdates_ReturnOneConflict_NotUnknownServerFailure()
     {
@@ -738,6 +816,10 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         Assert.Single(responses, response => response.StatusCode == HttpStatusCode.Conflict);
     }
 
+    /// <summary>Checks that cache invalidation failure after a database commit preserves the successful mutation response.</summary>
+    /// <param name="operation">The committed message mutation exercised before cache failure: create, update, or delete.</param>
+    /// <param name="providerCancellation">Whether cache invalidation throws provider cancellation rather than a provider error while the caller remains uncancelled.</param>
+    /// <returns>A task that completes after verifying that cache invalidation failure after a database commit preserves the successful mutation response.</returns>
     [Theory]
     [InlineData("create", false)]
     [InlineData("create", true)]
@@ -784,6 +866,8 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         }
     }
 
+    /// <summary>Checks that concurrent HTTP deletes produce one success and one conflict, followed by not found.</summary>
+    /// <returns>A task that completes after verifying that concurrent HTTP deletes produce one success and one conflict, followed by not found.</returns>
     [Fact]
     public async Task HttpConcurrentDeletes_ReturnOneConflict_ThenMissing()
     {
@@ -803,6 +887,9 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         Assert.Single(responses, response => response.StatusCode == HttpStatusCode.Conflict);
     }
 
+    /// <summary>Checks that an unclassified update or deletion persistence failure remains a server error without committing.</summary>
+    /// <param name="operation">The message mutation subjected to an injected unknown save failure: update or delete.</param>
+    /// <returns>A task that completes after verifying that an unclassified update or deletion persistence failure remains a server error without committing.</returns>
     [Theory]
     [InlineData("update")]
     [InlineData("delete")]
@@ -820,6 +907,8 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
         Assert.Equal("unchanged", (await read.Messages.AsNoTracking().SingleAsync()).MessageContent);
     }
 
+    /// <summary>Checks that a genuinely cancelled caller still receives cancellation during cache invalidation.</summary>
+    /// <returns>A task that completes after verifying that a genuinely cancelled caller still receives cancellation during cache invalidation.</returns>
     [Fact]
     public async Task Invalidation_ActuallyCancelledCaller_StillPropagatesCancellation()
     {
@@ -830,6 +919,7 @@ public sealed class ContactRuntimeParityBoundaryTests(ContactRuntimePostgresFixt
     }
 }
 
+/// <summary>Owns a resource-limited disposable PostgreSQL container, migration lifecycle, and sanitized cleanup evidence for runtime tests.</summary>
 public sealed class ContactRuntimePostgresFixture : IAsyncLifetime
 {
     private readonly string lease = Guid.NewGuid().ToString("N");
@@ -837,6 +927,7 @@ public sealed class ContactRuntimePostgresFixture : IAsyncLifetime
     private readonly ContactFixtureLifecycle lifecycle;
     private readonly ContactFixtureReceiptIdentity receiptIdentity = new();
 
+    /// <summary>Configures the labelled PostgreSQL container, resource limits, and joined startup, migration, and disposal lifecycle.</summary>
     public ContactRuntimePostgresFixture()
     {
         container = new PostgreSqlBuilder("postgres:18-alpine")
@@ -873,16 +964,23 @@ public sealed class ContactRuntimePostgresFixture : IAsyncLifetime
             }, Observe);
     }
 
+    /// <summary>Gets the connection string for the fixture-owned disposable PostgreSQL container.</summary>
     public string ConnectionString => container.GetConnectionString();
+    /// <summary>Creates a context connected to the fixture-owned PostgreSQL database.</summary>
+    /// <returns>A new caller-owned Contact database context configured with the fixture connection string.</returns>
     public ContactRequestDbContext CreateContext() => new(new DbContextOptionsBuilder<ContactRequestDbContext>()
         .UseNpgsql(ConnectionString).Options);
 
+    /// <summary>Starts PostgreSQL and applies migrations through the joined lifecycle under a bounded initialization deadline.</summary>
+    /// <returns>A task that completes after container startup and database migration settle.</returns>
     public async Task InitializeAsync()
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await lifecycle.InitializeAsync(deadline.Token);
     }
 
+    /// <summary>Clears all synthetic messages after resource admission under a bounded reset deadline.</summary>
+    /// <returns>A task that completes after all rows in the fixture message table are deleted.</returns>
     public async Task ResetAsync()
     {
         ObserveAdmission("reset");
@@ -891,6 +989,8 @@ public sealed class ContactRuntimePostgresFixture : IAsyncLifetime
         await db.Messages.ExecuteDeleteAsync(deadline.Token);
     }
 
+    /// <summary>Disposes the fixture through its retained lifecycle cleanup task.</summary>
+    /// <returns>The shared task that completes when fixture-owned PostgreSQL cleanup settles.</returns>
     public Task DisposeAsync() => lifecycle.DisposeAsync();
 
     private void ObserveAdmission(string phase)

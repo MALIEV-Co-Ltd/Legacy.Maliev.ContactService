@@ -6,10 +6,15 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Legacy.Maliev.ContactService.Tests.Controllers;
 
+/// <summary>Checks that generated OpenAPI examples execute successfully and malformed bodies follow the documented validation contract.</summary>
+/// <param name="postgres">The shared disposable PostgreSQL fixture used to verify example payloads against stored contact messages.</param>
 [Collection("Contact literal payload")]
 public sealed class ContactDocumentationExamplesHttpTests(ContactRuntimePostgresFixture postgres)
     : IClassFixture<ContactRuntimePostgresFixture>
 {
+    /// <summary>Executes documented create and replacement examples, then checks omitted-field clearing, stored values, and page metadata.</summary>
+    /// <param name="route">The contact collection alias whose generated examples are executed: /Messages or /messages/v1/contact-requests.</param>
+    /// <returns>A task that completes after all assertions for this scenario finish.</returns>
     [Theory]
     [InlineData("/Messages")]
     [InlineData("/messages/v1/contact-requests")]
@@ -103,6 +108,9 @@ public sealed class ContactDocumentationExamplesHttpTests(ContactRuntimePostgres
         Assert.Null(clearedRow.Country);
     }
 
+    /// <summary>Checks that malformed JSON returns the documented validation-problem shape without creating a message.</summary>
+    /// <param name="route">The contact collection alias whose documented bad-request response is compared with a real malformed-body request.</param>
+    /// <returns>A task that completes after verifying that malformed JSON returns the documented validation-problem shape without creating a message.</returns>
     [Theory]
     [InlineData("/Messages")]
     [InlineData("/messages/v1/contact-requests")]

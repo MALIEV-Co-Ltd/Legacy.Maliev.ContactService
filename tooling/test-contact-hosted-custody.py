@@ -21,7 +21,8 @@ class CustodyControls(unittest.TestCase):
         primary = environment_failure if environment_failure is not None else observed if isinstance(observed, BaseException) else None
         with ExitStack() as stack:
             stack.enter_context(patch.object(Path, 'iterdir', return_value=[Path('/proc/' + str(candidate['pid']))]))
-            metadata = stack.enter_context(patch.object(custody, 'process_metadata', side_effect=[candidate, observed]))
+            effects = [candidate, observed] + ([dict(candidate)] if observed is None else [])
+            metadata = stack.enter_context(patch.object(custody, 'process_metadata', side_effect=effects))
             stack.enter_context(patch.object(custody.os, 'getuid', return_value=1001, create=True))
             content = b'CONTACT_HOSTED_RUN_LEASE=owned-lease\0' if nonce else environment
             environ = stack.enter_context(patch.object(Path, 'read_bytes', side_effect=environment_failure,
@@ -41,7 +42,7 @@ class CustodyControls(unittest.TestCase):
                     custody.members(anchor, 'owned-lease', known)
             else:
                 self.assertEqual([], custody.members(anchor, 'owned-lease', known))
-            expected_reads = 1 if nonce or retained or environment_failure is not None else 2
+            expected_reads = 1 if nonce or retained or environment_failure is not None else 3 if observed is None else 2
             self.assertEqual([candidate['pid']] * expected_reads,
                              [call.args[0] for call in metadata.call_args_list])
             if candidate['uid'] == 1001 and not retained:
@@ -50,6 +51,211 @@ class CustodyControls(unittest.TestCase):
                 environ.assert_not_called()
             for probe in forbidden:
                 probe.assert_not_called()
+
+
+
+    def absence_controls(self, branch, second=..., leading_zombie=False, failure=None):
+        anchor = {'pid': 6259, 'session': 6259, 'startTicks': 8242,
+                  'uid': 1001, 'executable': '/sdk/dotnet'}
+        candidate = {'pid': 6630, 'parentPid': 6597, 'session': 6259,
+                     'startTicks': 9341, 'uid': 1001, 'state': 'R'}
+        if branch == 'older':
+            candidate.update(startTicks=8000, session=8000)
+        elif branch == 'zero':
+            candidate.update(session=0, uid=0)
+        elif branch == 'zombie':
+            candidate['state'] = 'Z'
+        primary = PermissionError(errno.EACCES, 'synthetic', '/proc/6630/environ')
+        followup = None if second is ... else second(candidate)
+        observations = [candidate, *([dict(candidate)] if leading_zombie else []),
+                        None, failure if failure is not None else followup]
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(Path, 'iterdir', return_value=[Path('/proc/6630')]))
+            metadata = stack.enter_context(patch.object(custody, 'process_metadata', side_effect=observations))
+            stack.enter_context(patch.object(custody.os, 'getuid', return_value=1001, create=True))
+            leader = stack.enter_context(patch.object(custody, 'live_original_leader', return_value=False))
+            environ = stack.enter_context(patch.object(Path, 'read_bytes', side_effect=primary))
+            forbidden = [stack.enter_context(patch.object(custody, name,
+                side_effect=AssertionError('Absence cannot grant ownership')))
+                for name in ('identity', 'selected_identity', 'signal_exact')]
+            forbidden.append(stack.enter_context(patch.object(custody.os, 'kill',
+                side_effect=AssertionError('Absence cannot signal a process'))))
+            if second is ... and failure is None:
+                self.assertEqual([], custody.members(anchor, 'owned-lease', [anchor]))
+            else:
+                with self.assertRaises(PermissionError if branch == 'permission' else RuntimeError) as result:
+                    custody.members(anchor, 'owned-lease', [anchor])
+                if branch == 'permission':
+                    self.assertIs(primary, result.exception)
+            self.assertEqual([6630] * len(observations), [call.args[0] for call in metadata.call_args_list])
+            if branch == 'permission':
+                environ.assert_called_once_with()
+                leader.assert_called_once_with(anchor)
+            else:
+                environ.assert_not_called()
+                leader.assert_not_called()
+            for probe in forbidden:
+                probe.assert_not_called()
+
+    def test_two_authoritative_missing_rechecks_exclude_only_unretained_candidates(self):
+        for branch in ('older', 'zero', 'zombie', 'permission'):
+            with self.subTest(branch=branch):
+                self.absence_controls(branch)
+
+    def test_zombie_then_two_missing_rechecks_is_absence_not_one_zombie_plus_one_missing(self):
+        self.absence_controls('zombie', leading_zombie=True)
+
+    def test_missing_then_live_reused_or_malformed_recheck_keeps_existing_refusal(self):
+        changes = ({}, {'pid': 6631}, {'session': 6260}, {'startTicks': 9342},
+                   {'uid': 1002}, {'state': 'Z'}, {'session': True}, {'uid': -1})
+        for branch in ('older', 'zero', 'zombie', 'permission'):
+            for change in changes:
+                with self.subTest(branch=branch, change=change):
+                    self.absence_controls(branch,
+                        second=lambda candidate, change=change: dict(candidate, **change))
+
+    def test_missing_then_unreadable_or_parser_recheck_keeps_guard_or_exact_primary(self):
+        for branch in ('older', 'zero', 'zombie', 'permission'):
+            for failure in (PermissionError(errno.EACCES, 'synthetic', '/proc/6630/stat'),
+                            RuntimeError('synthetic'), ValueError('synthetic stat'),
+                            IndexError('synthetic stat')):
+                with self.subTest(branch=branch, failure=type(failure).__name__):
+                    self.absence_controls(branch, failure=failure)
+
+    def test_absence_helper_never_rechecks_anchor_or_any_retained_pid_generation(self):
+        anchor = {'pid': 6259, 'session': 6259, 'startTicks': 8242, 'uid': 1001}
+        retained = dict(anchor, pid=6630, startTicks=9300)
+        for pid in (6259, 6630):
+            candidate = dict(anchor, pid=pid, startTicks=9341)
+            with self.subTest(pid=pid), patch.object(custody, 'process_metadata') as metadata, \
+                    patch.object(custody.os, 'kill') as signal:
+                self.assertFalse(custody.confirmed_unretained_absence(candidate, anchor, [anchor, retained], None))
+            metadata.assert_not_called()
+            signal.assert_not_called()
+
+    def test_missing_parent_never_substitutes_for_sampled_candidate_absence(self):
+        anchor = {'pid': 6259, 'session': 6259, 'startTicks': 8242, 'uid': 1001}
+        child = dict(anchor, pid=6630, parentPid=6597, startTicks=9341, state='R')
+        with patch.object(custody, 'process_metadata',
+                          side_effect=lambda pid: None if pid == 6597 else child) as metadata:
+            self.assertFalse(custody.confirmed_unretained_absence(child, anchor, [anchor], None))
+        metadata.assert_called_once_with(6630)
+
+    def test_proc_metadata_none_only_follows_fixed_path_missing_or_lookup_failures(self):
+        for failure in (FileNotFoundError(errno.ENOENT, 'synthetic', '/proc/6630/stat'),
+                        ProcessLookupError(errno.ESRCH, 'synthetic', '/proc/6630/stat')):
+            with self.subTest(failure=type(failure).__name__), \
+                    patch.object(Path, 'read_text', side_effect=failure) as read:
+                self.assertIsNone(custody.process_metadata(6630))
+                read.assert_called_once_with()
+        for failure in (PermissionError(errno.EACCES, 'synthetic', '/proc/6630/stat'),
+                        ValueError('synthetic stat'), IndexError('synthetic stat')):
+            with self.subTest(failure=type(failure).__name__), \
+                    patch.object(Path, 'read_text', side_effect=failure):
+                with self.assertRaises(type(failure)) as result:
+                    custody.process_metadata(6630)
+                self.assertIs(failure, result.exception)
+
+    def test_absence_probe_cancellation_is_not_reclassified_or_consumed(self):
+        anchor = {'pid': 6259, 'session': 6259, 'startTicks': 8242, 'uid': 1001}
+        candidate = dict(anchor, pid=6630, startTicks=9341, state='R')
+        primary = InterruptedError('synthetic cancellation')
+        with patch.object(custody, 'process_metadata', side_effect=primary):
+            with self.assertRaises(InterruptedError) as result:
+                custody.confirmed_unretained_absence(candidate, anchor, [anchor], None)
+        self.assertIs(primary, result.exception)
+        environment_error = PermissionError(errno.EACCES, 'synthetic', '/proc/6630/environ')
+        with patch.object(Path, 'iterdir', return_value=[Path('/proc/6630')]), \
+                patch.object(custody, 'process_metadata', side_effect=[candidate, None, primary]), \
+                patch.object(custody.os, 'getuid', return_value=1001, create=True), \
+                patch.object(custody, 'live_original_leader', return_value=False), \
+                patch.object(Path, 'read_bytes', side_effect=environment_error), \
+                patch.object(custody.os, 'kill') as signal:
+            with self.assertRaises(InterruptedError) as result:
+                custody.members(anchor, 'owned-lease', [anchor])
+            self.assertIs(primary, result.exception)
+            signal.assert_not_called()
+
+    def zombie_controls(self, initial_state='Z', observations=None, permission=False,
+                        expected_failure=False, uid=1001, sid=6259):
+        anchor = {'pid': 6259, 'session': 6259, 'startTicks': 8242,
+                  'uid': 1001, 'executable': '/sdk/dotnet'}
+        candidate = {'pid': 6630, 'parentPid': 6597, 'session': sid,
+                     'startTicks': 9341, 'uid': uid, 'state': initial_state}
+        zombie = dict(candidate, state='Z')
+        rechecks = [zombie, zombie] if observations is None else observations(candidate)
+        if rechecks and rechecks[-1] is None:
+            rechecks.append(dict(candidate, state='R'))  # One missing observation is still a refusal.
+        primary = PermissionError(errno.EACCES, 'synthetic', '/proc/6630/environ')
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(Path, 'iterdir', return_value=[Path('/proc/6630')]))
+            metadata = stack.enter_context(patch.object(custody, 'process_metadata',
+                                                       side_effect=[candidate, *rechecks]))
+            stack.enter_context(patch.object(custody.os, 'getuid', return_value=1001, create=True))
+            leader = stack.enter_context(patch.object(custody, 'live_original_leader', return_value=False))
+            environ = stack.enter_context(patch.object(Path, 'read_bytes', side_effect=primary))
+            forbidden = [stack.enter_context(patch.object(custody, name,
+                side_effect=AssertionError('Zombie must never grant ownership')))
+                for name in ('identity', 'selected_identity', 'signal_exact')]
+            forbidden.append(stack.enter_context(patch.object(custody.os, 'kill',
+                side_effect=AssertionError('Zombie must never be signaled'))))
+            if expected_failure:
+                expected_type = PermissionError if permission else RuntimeError
+                with self.assertRaises(expected_type) as result:
+                    custody.members(anchor, 'owned-lease', [anchor])
+                if permission:
+                    self.assertIs(primary, result.exception)
+            else:
+                self.assertEqual([], custody.members(anchor, 'owned-lease', [anchor]))
+                self.assertEqual([6630, 6630, 6630],
+                                 [call.args[0] for call in metadata.call_args_list])
+            if permission:
+                environ.assert_called_once_with()
+                leader.assert_called_once_with(anchor)
+            else:
+                environ.assert_not_called()
+                leader.assert_not_called()
+            for probe in forbidden:
+                probe.assert_not_called()
+
+    def test_actual_6630_zombie_requires_two_fresh_exact_generations_without_ownership(self):
+        self.zombie_controls()
+
+    def test_zombie_exclusion_does_not_depend_on_current_uid_or_numeric_session(self):
+        for uid, sid in ((0, 8000), (2001, 9000), (1001, 6259)):
+            with self.subTest(uid=uid, sid=sid):
+                self.zombie_controls(uid=uid, sid=sid)
+
+    def test_environ_permission_race_requires_two_fresh_exact_zombie_observations(self):
+        self.zombie_controls(initial_state='R', permission=True)
+
+    def test_zombie_recheck_changed_missing_live_or_invalid_is_never_excluded(self):
+        changes = [None, {'pid': 6631}, {'session': 6260}, {'startTicks': 9342},
+                   {'uid': 1002}, {'state': 'R'}, {'state': 'S'}, {'state': None},
+                   {'session': 0}, {'session': True}, {'startTicks': -1}, {'uid': True}]
+        for permission in (False, True):
+            for index in (0, 1):
+                for change in changes:
+                    with self.subTest(permission=permission, index=index, change=change):
+                        def observations(candidate, change=change, index=index):
+                            values = [dict(candidate, state='Z'), dict(candidate, state='Z')]
+                            values[index] = None if change is None else dict(values[index], **change)
+                            return values
+                        self.zombie_controls(initial_state='R' if permission else 'Z',
+                                             observations=observations, permission=permission,
+                                             expected_failure=True)
+
+    def test_live_unreadable_environ_preserves_the_exact_permission_primary(self):
+        self.zombie_controls(initial_state='R', permission=True,
+            observations=lambda candidate: [dict(candidate)], expected_failure=True)
+
+    def test_permission_recheck_errors_preserve_exact_environment_primary(self):
+        for failure in (PermissionError(errno.EACCES, 'synthetic', '/proc/6630/stat'),
+                        ProcessLookupError('synthetic'), RuntimeError('synthetic'),
+                        ValueError('synthetic stat field'), IndexError('synthetic stat shape')):
+            with self.subTest(failure=type(failure).__name__):
+                self.zombie_controls(initial_state='R', permission=True,
+                    observations=lambda candidate, failure=failure: [failure], expected_failure=True)
 
     def test_actual_newer_6884_zero_session_shape_is_rechecked_and_preserved(self):
         self.candidate_zero_controls({'pid': 6884, 'parentPid': 2, 'session': 0,
@@ -105,6 +311,8 @@ class CustodyControls(unittest.TestCase):
         anchor = {'pid': 5710, 'session': 5710, 'startTicks': 6376, 'uid': 1001, 'executable': '/sdk/dotnet'}
         candidate = {'pid': 2, 'parentPid': 0, 'session': 0, 'startTicks': birth, 'uid': 0}
         effects = [candidate, dict(candidate) if recheck is ... else recheck]
+        if recheck is None:
+            effects.append(dict(candidate))  # Existing negative case is a SINGLE missing observation.
         known = [anchor, dict(candidate, executable='/sdk/retained')] if retained else [anchor]
         with ExitStack() as stack:
             stack.enter_context(patch.object(Path, 'iterdir', return_value=[Path('/proc/2')]))
@@ -123,7 +331,7 @@ class CustodyControls(unittest.TestCase):
                     self.assertIs(recheck, result.exception)
             else:
                 self.assertEqual([], custody.members(anchor, 'owned-lease', known))
-            expected_reads = [2] if retained else [2, 2]
+            expected_reads = [2] if retained else [2, 2, 2] if recheck is None else [2, 2]
             self.assertEqual(expected_reads, [call.args[0] for call in metadata.call_args_list])
             for probe in forbidden:
                 probe.assert_not_called()
@@ -329,6 +537,8 @@ class CustodyControls(unittest.TestCase):
         candidate = {'pid': 18, 'session': session, 'startTicks': 29, 'uid': 1001}
         observed = dict(candidate) if recheck is ... else recheck
         effects = [candidate, failure if failure is not None else observed]
+        if observed is None and failure is None:
+            effects.append(dict(candidate))  # Preserve the existing single-missing refusal.
         with ExitStack() as stack:
             stack.enter_context(patch.object(Path, 'iterdir', return_value=[Path('/proc/18')]))
             metadata = stack.enter_context(patch.object(custody, 'process_metadata', side_effect=effects))
@@ -345,7 +555,8 @@ class CustodyControls(unittest.TestCase):
                     custody.members(anchor, 'owned-lease', [anchor])
             else:
                 self.assertEqual([], custody.members(anchor, 'owned-lease', [anchor]))
-            self.assertEqual([18, 18], [call.args[0] for call in metadata.call_args_list])
+            expected_reads = [18, 18, 18] if observed is None and failure is None else [18, 18]
+            self.assertEqual(expected_reads, [call.args[0] for call in metadata.call_args_list])
             for probe in forbidden:
                 probe.assert_not_called()
 

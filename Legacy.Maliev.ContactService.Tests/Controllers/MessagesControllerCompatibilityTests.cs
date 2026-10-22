@@ -9,8 +9,10 @@ using System.Reflection;
 
 namespace Legacy.Maliev.ContactService.Tests.Controllers;
 
+/// <summary>Checks retained message controller permission, empty-result, and created-resource route contracts.</summary>
 public sealed class MessagesControllerCompatibilityTests
 {
+    /// <summary>Checks that paginated contact reads require the contact-request read permission and do not allow anonymous access.</summary>
     [Fact]
     public void GetPaginatedAsync_requires_contact_message_read_permission()
     {
@@ -24,6 +26,8 @@ public sealed class MessagesControllerCompatibilityTests
             method.GetCustomAttribute<RequirePermissionAttribute>()?.Permission);
     }
 
+    /// <summary>Checks that an empty legacy paginated service result produces a not-found controller response.</summary>
+    /// <returns>A task that completes after asserting that an empty paginated result is returned as NotFoundResult.</returns>
     [Fact]
     public async Task GetPaginatedAsync_returns_not_found_for_empty_legacy_result()
     {
@@ -34,6 +38,8 @@ public sealed class MessagesControllerCompatibilityTests
         Assert.IsType<NotFoundResult>(result.Result);
     }
 
+    /// <summary>Checks that creating a contact request retains the GetMessage route name and messageId route value used for its location.</summary>
+    /// <returns>A task that completes after asserting the created-resource route name and identifier value.</returns>
     [Fact]
     public async Task CreateContactRequestAsync_uses_legacy_GetMessage_route_and_messageId_parameter()
     {

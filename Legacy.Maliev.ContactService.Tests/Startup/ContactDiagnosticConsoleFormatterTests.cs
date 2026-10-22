@@ -17,9 +17,13 @@ using Microsoft.Extensions.Options;
 
 namespace Legacy.Maliev.ContactService.Tests.Startup;
 
+/// <summary>Verifies safe private console diagnostics through direct formatting and configured production host pipelines.</summary>
 [Collection(nameof(ContactConsoleCaptureCollection))]
 public sealed class ContactDiagnosticConsoleFormatterTests
 {
+    /// <summary>Checks severity filtering and fixed safe messages without invoking arbitrary message formatters.</summary>
+    /// <param name="level">The log level supplied to the formatter, including suppressed levels and Warning, Error, or Critical.</param>
+    /// <param name="severity">The expected uppercase severity of an emitted event, or null when the selected level must emit nothing.</param>
     [Theory]
     [InlineData(LogLevel.Trace, null)]
     [InlineData(LogLevel.Debug, null)]
@@ -43,6 +47,7 @@ public sealed class ContactDiagnosticConsoleFormatterTests
         Assert.Equal(TimeSpan.Zero, DateTimeOffset.Parse(document.RootElement.GetProperty("occurredAtUtc").GetString()!, CultureInfo.InvariantCulture).Offset);
     }
 
+    /// <summary>Checks runtime exception, activity, source-location, and deployment provenance against forged state values.</summary>
     [Fact]
     public void PrivateFormatter_PreservesRuntimeExceptionActivityAndDeploymentProvenance()
     {
@@ -66,6 +71,8 @@ public sealed class ContactDiagnosticConsoleFormatterTests
         Assert.DoesNotContain("private@example.invalid", line);
     }
 
+    /// <summary>Checks runtime source locations for asynchronous and generic failures without leaking private exception text.</summary>
+    /// <returns>A task that completes when asynchronous and generic runtime source-location assertions finish.</returns>
     [Fact]
     public async Task PrivateFormatter_PreservesAsyncAndGenericReflectionSourceLocations()
     {
@@ -86,6 +93,7 @@ public sealed class ContactDiagnosticConsoleFormatterTests
         Assert.DoesNotContain("private@example.invalid", genericDocument.RootElement.GetRawText());
     }
 
+    /// <summary>Checks accepted diagnostic scalars and canonical correlation identifiers while preserving safe incident metadata.</summary>
     [Fact]
     public void PrivateFormatter_PreservesOriginalSafeFieldsAndModernTypeIncidentAdaptation()
     {
@@ -118,6 +126,8 @@ public sealed class ContactDiagnosticConsoleFormatterTests
             Assert.Equal(JsonSerializer.Serialize(field.Value), root.GetProperty(field.Key).GetRawText());
     }
 
+    /// <summary>Checks omission of unknown keys and invalid scalar representations from private diagnostic output.</summary>
+    /// <param name="key">The unrecognized or restricted state key supplied with an email-shaped value that must be excluded.</param>
     [Theory]
     [InlineData("EventName")]
     [InlineData("Path")]
@@ -136,6 +146,7 @@ public sealed class ContactDiagnosticConsoleFormatterTests
         Assert.DoesNotContain("private@example.invalid", line);
     }
 
+    /// <summary>Checks state precedence over scopes, unique output keys, and bounded scope traversal.</summary>
     [Fact]
     public void PrivateFormatter_StateWinsWithoutDuplicateKeysAndScopeProcessingIsBounded()
     {
@@ -160,6 +171,7 @@ public sealed class ContactDiagnosticConsoleFormatterTests
         finally { foreach (var handle in handles.AsEnumerable().Reverse()) handle.Dispose(); }
     }
 
+    /// <summary>Checks bounded state enumeration and safe logger fallback for untrusted or absent categories.</summary>
     [Fact]
     public void PrivateFormatter_StateEnumerationAndUntrustedCategoryFailClosed()
     {
@@ -172,6 +184,7 @@ public sealed class ContactDiagnosticConsoleFormatterTests
         Assert.Equal("ConfiguredLogger", missingCategory.RootElement.GetProperty("logger").GetString());
     }
 
+    /// <summary>Checks that the private formatter rejects a null output writer.</summary>
     [Fact]
     public void PrivateFormatter_NullWriterIsRejected()
     {
@@ -179,6 +192,7 @@ public sealed class ContactDiagnosticConsoleFormatterTests
         Assert.Throws<ArgumentNullException>(() => new ContactDiagnosticConsoleFormatter().Write(entry, null, null!));
     }
 
+    /// <summary>Checks private warning-level console registration while retaining other logging providers.</summary>
     [Fact]
     public void PrivateRegistration_SelectsOwnedWarningFormatterAndPreservesOtherProviders()
     {
@@ -198,6 +212,8 @@ public sealed class ContactDiagnosticConsoleFormatterTests
             && rule.CategoryName is null && rule.LogLevel == LogLevel.Warning);
     }
 
+    /// <summary>Checks the actual console queue's severity filtering, redaction, and correlated HTTP failure output while retaining other providers.</summary>
+    /// <returns>A task that completes when the real console provider queue has drained and severity, redaction, and HTTP incident assertions finish.</returns>
     [Fact]
     public async Task ConfiguredContactHost_ConsoleQueueFiltersInformationAndRedactsWarningAndHttpFailure()
     {
@@ -298,7 +314,136 @@ public sealed class ContactDiagnosticConsoleFormatterTests
         Assert.False(failure.TryGetProperty("Path", out _));
     }
 
-    private sealed class ConsoleHostFactory(HostRetainedProvider retained, string sensitive)
+
+    /// <summary>Checks stable per-host health identity, quiet successful probes, and private synthetic failure throttling through the configured host.</summary>
+    /// <returns>A task that completes when health identity, quiet probes, admitted synthetic events, and throttling assertions finish.</returns>
+    [Fact]
+    public async Task ConfiguredContactHost_HealthIdentityAndSyntheticProbePreserveQuietPrivateSourceContract()
+    {
+        const string nonce = "0123456789abcdef0123456789abcdef";
+        var originalOut = Console.Out;
+        var originalError = Console.Error;
+        using var output = new StringWriter(CultureInfo.InvariantCulture);
+        using var synchronizedOutput = TextWriter.Synchronized(output);
+        var retained = new HostRetainedProvider();
+        Console.SetOut(synchronizedOutput);
+        Console.SetError(synchronizedOutput);
+        try
+        {
+            await using var factory = new ConsoleHostFactory(retained, "private@example.invalid", healthOnly: true);
+            using var client = factory.CreateClient();
+            var liveness = await SendObservationAsync(factory, "/messages/liveness");
+            Assert.Equal(200, liveness.Response.StatusCode);
+            var marker = liveness.Response.Headers["X-Maliev-Health-Instance"].ToString();
+            Assert.Matches("^[a-f0-9]{32}$", marker);
+            Assert.Equal("no-store", liveness.Response.Headers.CacheControl.ToString());
+            Assert.False(liveness.Response.Headers.ContainsKey("X-Maliev-Diagnostic-Id"));
+            var readiness = await SendObservationAsync(factory, "/messages/readiness");
+            Assert.Equal(200, readiness.Response.StatusCode);
+            Assert.Equal(marker, readiness.Response.Headers["X-Maliev-Health-Instance"].ToString());
+            Assert.Equal("no-store", readiness.Response.Headers.CacheControl.ToString());
+            var repeated = await SendObservationAsync(factory, "/messages/liveness");
+            Assert.Equal(marker, repeated.Response.Headers["X-Maliev-Health-Instance"].ToString());
+            Assert.Empty(retained.ObservationLevels);
+
+            await using var independent = new ConsoleHostFactory(new HostRetainedProvider(), "private@example.invalid", healthOnly: true);
+            using var independentClient = independent.CreateClient();
+            var other = await SendObservationAsync(independent, "/messages/liveness");
+            var otherMarker = other.Response.Headers["X-Maliev-Health-Instance"].ToString();
+            Assert.Matches("^[a-f0-9]{32}$", otherMarker);
+            Assert.NotEqual(marker, otherMarker);
+
+            var admitted = await SendObservationAsync(factory, "/internal/diagnostics/observability", nonce: nonce);
+            Assert.Equal(500, admitted.Response.StatusCode);
+            Assert.Equal(marker, admitted.Response.Headers["X-Maliev-Health-Instance"].ToString());
+            Assert.Equal(nonce, admitted.Response.Headers["X-Maliev-Diagnostic-Id"].ToString());
+            Assert.Equal("no-store", admitted.Response.Headers.CacheControl.ToString());
+            Assert.Equal("noindex", admitted.Response.Headers["X-Robots-Tag"].ToString());
+            var throttled = await SendObservationAsync(factory, "/internal/diagnostics/observability", nonce: nonce);
+            Assert.Equal(429, throttled.Response.StatusCode);
+            Assert.False(throttled.Response.Headers.ContainsKey("X-Maliev-Health-Instance"));
+            Assert.False(throttled.Response.Headers.ContainsKey("X-Maliev-Diagnostic-Id"));
+            Assert.Equal("no-store", throttled.Response.Headers.CacheControl.ToString());
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            Console.SetError(originalError);
+        }
+
+        var lines = output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Where(line => line.TrimStart().StartsWith('{')).ToArray();
+        Assert.Equal(3, lines.Length);
+        var events = lines.Select(line =>
+        {
+            using var document = JsonDocument.Parse(line);
+            return document.RootElement.Clone();
+        }).ToArray();
+        Assert.Equal(new[] { "CRITICAL", "ERROR", "WARNING" },
+            events.Select(value => value.GetProperty("severity").GetString()).OrderBy(value => value));
+        Assert.All(events, value =>
+        {
+            Assert.True(value.GetProperty("Synthetic").GetBoolean());
+            Assert.Equal(nonce, value.GetProperty("DiagnosticId").GetString());
+        });
+        Assert.DoesNotContain("private@example.invalid", output.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>Checks that nonregistered or non-GET health-shaped requests do not expose health or diagnostic identity headers.</summary>
+    /// <param name="path">The health-shaped request path outside the registered native GET health contract.</param>
+    /// <param name="method">The GET, POST, or HEAD verb used to distinguish registered GET probes from excluded requests.</param>
+    /// <returns>A task that completes when excluded health requests omit identity headers.</returns>
+    [Theory]
+    [InlineData("/messages/liveness", "POST")]
+    [InlineData("/messages/readiness", "HEAD")]
+    [InlineData("/messages/aspire-liveness", "GET")]
+    [InlineData("/messages/private/readiness", "GET")]
+    [InlineData("/liveness", "GET")]
+    public async Task ConfiguredContactHost_OnlyRegisteredNativeGetHealthExposesIdentity(string path, string method)
+    {
+        await using var factory = new ConsoleHostFactory(new HostRetainedProvider(), "private@example.invalid", healthOnly: true);
+        using var client = factory.CreateClient();
+        var response = await SendObservationAsync(factory, path, method);
+        Assert.False(response.Response.Headers.ContainsKey("X-Maliev-Health-Instance"));
+        Assert.False(response.Response.Headers.ContainsKey("X-Maliev-Diagnostic-Id"));
+    }
+
+    /// <summary>Checks that disallowed diagnostic probe requests return a private 404 without synthetic observations.</summary>
+    /// <param name="method">The GET or rejected POST verb used for the diagnostic request.</param>
+    /// <param name="peer">The simulated remote IP address, including nonloopback and loopback peers used to exercise admission checks.</param>
+    /// <param name="nonce">The X-Maliev-Diagnostic-Id header value used to test a valid nonce with another failed gate or an invalid nonce.</param>
+    /// <returns>A task that completes when the disallowed probe returns a private 404 without synthetic failure observations.</returns>
+    [Theory]
+    [InlineData("GET", "203.0.113.8", "0123456789abcdef0123456789abcdef")]
+    [InlineData("POST", "127.0.0.1", "0123456789abcdef0123456789abcdef")]
+    [InlineData("GET", "127.0.0.1", "invalid")]
+    public async Task ConfiguredContactHost_UnadmittedSyntheticRequestRemainsPrivate(string method, string peer, string nonce)
+    {
+        var retained = new HostRetainedProvider();
+        await using var factory = new ConsoleHostFactory(retained, "private@example.invalid", healthOnly: true);
+        using var client = factory.CreateClient();
+        var response = await SendObservationAsync(factory, "/internal/diagnostics/observability", method, peer, nonce);
+        Assert.Equal(404, response.Response.StatusCode);
+        Assert.Equal("no-store", response.Response.Headers.CacheControl.ToString());
+        Assert.Equal("noindex", response.Response.Headers["X-Robots-Tag"].ToString());
+        Assert.False(response.Response.Headers.ContainsKey("X-Maliev-Health-Instance"));
+        Assert.False(response.Response.Headers.ContainsKey("X-Maliev-Diagnostic-Id"));
+        Assert.Empty(retained.ObservationLevels);
+    }
+
+    private static Task<Microsoft.AspNetCore.Http.HttpContext> SendObservationAsync(ConsoleHostFactory factory,
+        string path, string method = "GET", string peer = "127.0.0.1", string nonce = "0123456789abcdef0123456789abcdef")
+        => factory.Server.SendAsync(context =>
+        {
+            context.Request.Path = path;
+            context.Request.Method = method;
+            context.Request.Scheme = "https";
+            context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse(peer);
+            context.Request.Headers["X-Maliev-Diagnostic-Id"] = nonce;
+            context.Response.Headers.CacheControl = "public";
+        });
+
+    private sealed class ConsoleHostFactory(HostRetainedProvider retained, string sensitive, bool healthOnly = false)
         : Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program>
     {
         private readonly System.Security.Cryptography.RSA rsa = System.Security.Cryptography.RSA.Create(2048);
@@ -309,6 +454,8 @@ public sealed class ContactDiagnosticConsoleFormatterTests
             builder.ConfigureLogging(logging => logging.AddProvider(retained));
             builder.ConfigureTestServices(services =>
             {
+                if (healthOnly)
+                    services.Configure<Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckServiceOptions>(options => options.Registrations.Clear());
                 services.RemoveAll<Legacy.Maliev.ContactService.Application.Interfaces.IContactService>();
                 services.AddSingleton<Legacy.Maliev.ContactService.Application.Interfaces.IContactService>(new ConsoleFailureService(sensitive));
                 services.AddAuthentication("ConsoleProbe").AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, ConsoleProbeAuthentication>("ConsoleProbe", _ => { });
@@ -380,6 +527,7 @@ public sealed class ContactDiagnosticConsoleFormatterTests
     private sealed class HostRetainedProvider : ILoggerProvider
     {
         public System.Collections.Concurrent.ConcurrentQueue<LogLevel> ProbeLevels { get; } = new();
+        public System.Collections.Concurrent.ConcurrentQueue<LogLevel> ObservationLevels { get; } = new();
         public ILogger CreateLogger(string categoryName) => new HostRetainedLogger(this, categoryName);
         public void Dispose() { }
 
@@ -390,6 +538,8 @@ public sealed class ContactDiagnosticConsoleFormatterTests
             public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
             {
                 if (category == "Contact.ConsoleHostProbe") provider.ProbeLevels.Enqueue(logLevel);
+                if (category == "Maliev.Aspire.ServiceDefaults.Diagnostics.PrivateRequestObservation")
+                    provider.ObservationLevels.Enqueue(logLevel);
             }
         }
     }
@@ -426,5 +576,6 @@ public sealed class ContactDiagnosticConsoleFormatterTests
     }
 }
 
+/// <summary>Serializes tests that replace process-wide console writers while capturing the real console logging queue.</summary>
 [CollectionDefinition(nameof(ContactConsoleCaptureCollection), DisableParallelization = true)]
 public sealed class ContactConsoleCaptureCollection { }
