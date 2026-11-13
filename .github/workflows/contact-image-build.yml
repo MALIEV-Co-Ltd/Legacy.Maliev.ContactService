@@ -1,0 +1,85 @@
+name: Contact API image build
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'Legacy.Maliev.ContactService.Api/Dockerfile'
+      - '.github/workflows/contact-image-build.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'Legacy.Maliev.ContactService.Api/Dockerfile'
+      - '.github/workflows/contact-image-build.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  image-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Check out pinned ServiceDefaults
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: MALIEV-Co-Ltd/Legacy.Maliev.ServiceDefaults
+          ref: c40a7f82cea347b949444dcd7fb730f2b8dc3c0e
+          path: .dependencies/Legacy.Maliev.ServiceDefaults
+          persist-credentials: false
+      - name: Check out pinned CompatibilityContracts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: MALIEV-Co-Ltd/Legacy.Maliev.CompatibilityContracts
+          ref: 78e48ffc4ee000df0510cba5e7c7a3c4c4d539d7
+          path: .dependencies/Legacy.Maliev.CompatibilityContracts
+          persist-credentials: false
+      - name: Build exact Dockerfile without publishing
+        id: build
+        timeout-minutes: 30
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          tag="contact-image-build:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          test ! -e "$RUNNER_TEMP/contact-image-id"
+          docker build --progress=plain --iidfile "$RUNNER_TEMP/contact-image-id" \
+            --tag "$tag" --file Legacy.Maliev.ContactService.Api/Dockerfile . 2>&1 | tee "$RUNNER_TEMP/contact-image-build.log"
+          iid="$(cat "$RUNNER_TEMP/contact-image-id")"
+          [[ "$iid" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$(docker image inspect --format '{{.Id}}' "$tag")" = "$iid"
+          printf '%s\n' "$iid" > "$RUNNER_TEMP/contact-image-settled"
+          if grep -E '(^|[[:space:]])warning (CS|NU|MSB|NETSDK)[0-9]+' "$RUNNER_TEMP/contact-image-build.log"; then
+            echo 'Compiler or package warnings found' >&2
+            exit 1
+          fi
+          printf 'Built head=%s image=%s tag=%s\n' "$EXPECTED_HEAD" "$iid" "$tag"
+      - name: Remove exact owned image tag
+        if: always()
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="contact-image-build:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if ! test -s "$RUNNER_TEMP/contact-image-settled"; then
+            echo 'Build settlement marker absent; daemon/image custody remains unverified' >&2
+            exit 1
+          fi
+          iid="$(cat "$RUNNER_TEMP/contact-image-id")"
+          [[ "$iid" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$(cat "$RUNNER_TEMP/contact-image-settled")" = "$iid"
+          test "$(docker image inspect --format '{{.Id}}' "$tag")" = "$iid"
+          docker image rm "$tag"
+          docker info >/dev/null
+          if docker image inspect "$tag" >/dev/null 2>&1; then
+            echo 'Owned image tag remains' >&2
+            exit 1
+          fi
+          printf 'Removed exact tag=%s for image=%s; runner/daemon destruction not asserted\n' "$tag" "$iid"
