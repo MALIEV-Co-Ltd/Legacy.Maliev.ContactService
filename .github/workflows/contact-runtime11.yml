@@ -72,6 +72,7 @@ jobs:
         shell: bash
         run: |
           python3 -B tooling/test-contact-hosted-custody.py
+          python3 -I -B tooling/test-cleanup-diagnostic.py
           echo "BASH_ENV=$GITHUB_WORKSPACE/tooling/contact-hosted-dotnet.sh" >> "$GITHUB_ENV"
       - name: Validate .NET solution
         timeout-minutes: 30

@@ -257,7 +257,7 @@ def members(anchor, lease, retained):
     return rows
 
 
-def known_alive(retained):
+def known_alive(retained, contexts=None):
     alive = []
     failures = []
     for row in retained:
@@ -266,14 +266,22 @@ def known_alive(retained):
             if metadata is None or metadata['startTicks'] != row['startTicks']:
                 continue
             if not same_generation(metadata, row):
-                raise RuntimeError('Known birth still present but membership changed; preserve uncertain owner')
+                raise census_runtime_error('Known birth still present but membership changed; preserve uncertain owner', 'selected-generation', 'generation-changed', metadata=metadata)
             actual = selected_identity(metadata)
             if actual is not None:
                 if actual['executable'] != row['executable']:
-                    raise RuntimeError('Known executable changed; preserve owner')
+                    raise census_runtime_error('Known executable changed; preserve owner', 'selected-generation', 'observed-executable-changed', metadata=metadata)
                 alive.append(row)
         except BaseException as failure:
-            failures.append(type(failure).__name__)
+            if type(contexts) is dict:
+                record_cleanup_failure(contexts, failure)
+            else:
+                failures.append(type(failure).__name__)
+                if contexts is not None:
+                    try:
+                        contexts.append(failure_context(failure))
+                    except BaseException:
+                        pass  # Optional diagnostics cannot skip owner settlement.
     return alive, failures
 
 
@@ -281,7 +289,8 @@ def census_guard_context(stage, reason, field=None, invalid_kind=None, metadata=
     stages = ('anchor', 'retained-anchor', 'candidate', 'candidate-recheck',
               'selected-generation', 'original-leader', 'session-generation')
     reasons = ('metadata-unavailable', 'metadata-invalid', 'anchor-session-mismatch',
-               'generation-changed', 'leader-executable-changed', 'session-unverified', 'zombie-unverified')
+               'generation-changed', 'leader-executable-changed', 'session-unverified', 'zombie-unverified',
+               'observed-executable-changed', 'signal-identity-changed')
     if type(stage) is not str or stage not in stages or type(reason) is not str or reason not in reasons:
         return None
     if field is not None and (type(field) is not str or field not in ('pid', 'session', 'startTicks', 'uid')):
@@ -315,7 +324,7 @@ def census_runtime_error(message, stage, reason, field=None, invalid_kind=None, 
     return attach_census_guard_context(RuntimeError(message), stage, reason, field, invalid_kind, metadata)
 
 
-def failure_context(failure):
+def failure_context(failure, observe=True):
     """Retain only typed procfs access context, never messages or environment bytes."""
     context = {'exceptionType': type(failure).__name__}
     try:
@@ -341,6 +350,8 @@ def failure_context(failure):
         number = failure.errno
         if type(number) is int and 0 <= number <= 65535:
             context['errno'] = number
+        if not observe:
+            return context  # Cleanup diagnostics never launch an additional procfs observation.
         try:
             metadata = process_metadata(pid)
             if metadata is not None:
@@ -357,12 +368,46 @@ def failure_context(failure):
     return context
 
 
+
+MAX_CLEANUP_DIAGNOSTICS = 16
+MAX_DROPPED_COUNT = 2147483647
+
+
+def record_cleanup_failure(receipt, failure):
+    """Record bounded sanitized evidence without interrupting owner settlement."""
+    try:
+        receipt['cleanupHadFailure'] = True
+        failures = receipt['cleanupFailures']
+        if len(failures) < MAX_CLEANUP_DIAGNOSTICS:
+            failures.append(type(failure).__name__)
+        else:
+            receipt['cleanupFailuresDropped'] = min(MAX_DROPPED_COUNT, receipt.get('cleanupFailuresDropped', 0) + 1)
+        contexts = receipt.setdefault('cleanupFailureContexts', [])
+        context = failure_context(failure, observe=False)
+        existing = next((item for item in contexts if {key: value for key, value in item.items() if key != 'occurrences'} == context), None)
+        if existing is not None:
+            existing['occurrences'] = min(MAX_DROPPED_COUNT, existing['occurrences'] + 1)
+        elif len(contexts) < MAX_CLEANUP_DIAGNOSTICS:
+            contexts.append({**context, 'occurrences': 1})
+        else:
+            receipt['cleanupContextsDropped'] = min(MAX_DROPPED_COUNT, receipt.get('cleanupContextsDropped', 0) + 1)
+    except BaseException:
+        # Losing diagnostics never means the cleanup failure disappeared.
+        try:
+            receipt['cleanupHadFailure'] = True
+            receipt['cleanupDiagnosticRecordingFailed'] = True
+            receipt['cleanupContextsDropped'] = min(MAX_DROPPED_COUNT, receipt.get('cleanupContextsDropped', 0) + 1)
+        except BaseException:
+            pass
+
+
 def signal_exact(row, number):
     observed = identity(row['pid'])
     if observed is None:
         return
     if any(observed[key] != row[key] for key in ('session', 'startTicks', 'executable', 'uid')):
-        raise RuntimeError('Process identity changed; preserve it')
+        raise census_runtime_error('Process identity changed; preserve it', 'selected-generation',
+                                   'signal-identity-changed', metadata=observed)
     os.kill(row['pid'], number)
 
 
@@ -405,7 +450,9 @@ def execute(executable, arguments, phase, floor, environment):
     receipt = {'phase': phase, 'lease': lease, 'startedUtc': started.isoformat(),
                'expiryUtc': (started + dt.timedelta(seconds=660)).isoformat(),
                'floorKiB': floor, 'availableKiB': physical_kib(), 'ownedProcesses': [],
-               'containers': [], 'cleanupFailures': [], 'exitCode': None, 'terminal': False,
+               'containers': [], 'cleanupFailures': [], 'cleanupFailuresDropped': 0,
+               'cleanupContextsDropped': 0, 'cleanupHadFailure': False,
+               'cleanupDiagnosticRecordingFailed': False, 'exitCode': None, 'terminal': False,
                'classification': None}
     directory = Path('runner-results/hosted-custody')
     directory.mkdir(parents=True, exist_ok=True)
@@ -441,7 +488,10 @@ def execute(executable, arguments, phase, floor, environment):
     except BaseException as failure:
         primary = failure
         receipt['classification'] = type(failure).__name__
-        receipt['failureContext'] = failure_context(failure)
+        try:
+            receipt['failureContext'] = failure_context(failure)
+        except BaseException:
+            receipt['failureContextUnavailable'] = True
     finally:
         if child is None:
             receipt['terminal'] = True
@@ -453,8 +503,7 @@ def execute(executable, arguments, phase, floor, environment):
                 current = members(receipt['ownedProcesses'][0], lease, receipt['ownedProcesses'])
             except BaseException as census:
                 census_failed = True
-                receipt['cleanupFailures'].append(type(census).__name__)
-                receipt.setdefault('cleanupFailureContexts', []).append(failure_context(census))
+                record_cleanup_failure(receipt, census)
             for row in current:
                 if not any(old['pid'] == row['pid'] and old['startTicks'] == row['startTicks'] for old in receipt['ownedProcesses']):
                     receipt['ownedProcesses'].append(row)
@@ -464,7 +513,7 @@ def execute(executable, arguments, phase, floor, environment):
                 try:
                     signal_exact(row, signal.SIGTERM)
                 except BaseException as cleanup:
-                    receipt['cleanupFailures'].append(type(cleanup).__name__)
+                    record_cleanup_failure(receipt, cleanup)
             try:
                 grace = time.monotonic() + 10
                 # One absolute grace deadline; census failure cannot skip it or
@@ -479,24 +528,20 @@ def execute(executable, arguments, phase, floor, environment):
                                     signal_exact(row, signal.SIGTERM)
                         except BaseException as census:
                             census_failed = True
-                            receipt['cleanupFailures'].append(type(census).__name__)
-                            receipt.setdefault('cleanupFailureContexts', []).append(failure_context(census))
-                    survivors, observation_failures = known_alive(receipt['ownedProcesses'])
-                    receipt['cleanupFailures'].extend(observation_failures)
+                            record_cleanup_failure(receipt, census)
+                    survivors, _ = known_alive(receipt['ownedProcesses'], receipt)
                     if not survivors or time.monotonic() >= grace:
                         break
                     time.sleep(0.1)
             except BaseException as census:
                 census_failed = True
-                receipt['cleanupFailures'].append(type(census).__name__)
-                receipt.setdefault('cleanupFailureContexts', []).append(failure_context(census))
-            survivors, observation_failures = known_alive(receipt['ownedProcesses'])
-            receipt['cleanupFailures'].extend(observation_failures)
+                record_cleanup_failure(receipt, census)
+            survivors, _ = known_alive(receipt['ownedProcesses'], receipt)
             for row in survivors:
                 try:
                     signal_exact(row, signal.SIGKILL)
                 except BaseException as cleanup:
-                    receipt['cleanupFailures'].append(type(cleanup).__name__)
+                    record_cleanup_failure(receipt, cleanup)
             # Joining the retained child is independent of census and signal failures.
             try:
                 child.wait(timeout=5)
@@ -504,7 +549,7 @@ def execute(executable, arguments, phase, floor, environment):
                 actual_exit = child.returncode
                 receipt['actualChildExitCode'] = actual_exit if type(actual_exit) is int and -2147483648 <= actual_exit <= 2147483647 else None
             except BaseException as cleanup:
-                receipt['cleanupFailures'].append(type(cleanup).__name__)
+                record_cleanup_failure(receipt, cleanup)
             try:
                 if census_failed:
                     raise RuntimeError('Known child joined, complete census unverified; preserve unknown resources')
@@ -514,13 +559,13 @@ def execute(executable, arguments, phase, floor, environment):
                 if remaining:
                     raise RuntimeError('Owned processes remain')
             except BaseException as cleanup:
-                receipt['cleanupFailures'].append(type(cleanup).__name__)
+                record_cleanup_failure(receipt, cleanup)
             if receipt['terminal']:
                 try:
                     cleanup_containers(lease, started, receipt)
                 except BaseException as cleanup:
-                    receipt['cleanupFailures'].append(type(cleanup).__name__)
-        receipt['cleanupVerified'] = receipt['terminal'] and not receipt['cleanupFailures']
+                    record_cleanup_failure(receipt, cleanup)
+        receipt['cleanupVerified'] = receipt['terminal'] and not receipt['cleanupFailures'] and not receipt.get('cleanupHadFailure', False)
         receipt['endedUtc'] = dt.datetime.now(dt.timezone.utc).isoformat()
         try:
             (directory / (phase + '-' + lease + '.json')).write_text(json.dumps(receipt, indent=2) + '\n')
