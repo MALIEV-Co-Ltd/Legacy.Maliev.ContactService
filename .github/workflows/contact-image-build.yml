@@ -6,11 +6,15 @@ on:
     paths:
       - 'Legacy.Maliev.ContactService.Api/Dockerfile'
       - '.github/workflows/contact-image-build.yml'
+      - 'tooling/contact-image-deadline-public.py'
+      - 'tooling/test-contact-image-deadline-public.py'
   push:
     branches: [main]
     paths:
       - 'Legacy.Maliev.ContactService.Api/Dockerfile'
       - '.github/workflows/contact-image-build.yml'
+      - 'tooling/contact-image-deadline-public.py'
+      - 'tooling/test-contact-image-deadline-public.py'
 
 permissions:
   contents: read
@@ -18,7 +22,7 @@ permissions:
 jobs:
   image-build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 55
     env:
       EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
@@ -41,6 +45,24 @@ jobs:
           ref: 78e48ffc4ee000df0510cba5e7c7a3c4c4d539d7
           path: .dependencies/Legacy.Maliev.CompatibilityContracts
           persist-credentials: false
+      - name: Check deadline admission controls
+        timeout-minutes: 1
+        run: python3 -I -B tooling/test-contact-image-deadline-public.py
+      - name: Admit current job receipt ownership
+        id: receipt_preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in contact-image-id contact-image-settled contact-image-build-started contact-image-build.log contact-image-remove-invoked contact-image-remove-settled contact-startup-cid contact-startup-create-output contact-startup-inspect.json contact-startup-isolation.json contact-startup-create-invoked contact-startup-create-settled contact-startup-start-invoked contact-startup-start-settled contact-startup-probe-invoked contact-startup-probe-output contact-startup-probe-settled contact-startup-stop-invoked contact-startup-stop-settled contact-startup-remove-invoked contact-startup-remove-settled contact-startup-cleaned; do
+            test ! -e "$RUNNER_TEMP/$file"
+            test ! -L "$RUNNER_TEMP/$file"
+          done
+          sentinel="$RUNNER_TEMP/contact61-receipts-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -- "$sentinel"
+          printf 'admitted=true\n' >> "$GITHUB_OUTPUT"
+      - name: Admit build with cleanup reserve
+        timeout-minutes: 1
+        run: python3 -I -B tooling/contact-image-deadline-public.py build
       - name: Build exact Dockerfile without publishing
         id: build
         timeout-minutes: 30
@@ -48,26 +70,211 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git -C .dependencies/Legacy.Maliev.ServiceDefaults rev-parse HEAD)" = c40a7f82cea347b949444dcd7fb730f2b8dc3c0e
+          test "$(git -C .dependencies/Legacy.Maliev.CompatibilityContracts rev-parse HEAD)" = 78e48ffc4ee000df0510cba5e7c7a3c4c4d539d7
+          printf 'Source head=%s tree=%s\n' "$EXPECTED_HEAD" "$(git rev-parse HEAD^{tree})"
           tag="contact-image-build:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           test ! -e "$RUNNER_TEMP/contact-image-id"
-          docker build --progress=plain --iidfile "$RUNNER_TEMP/contact-image-id" \
+          test ! -e "$RUNNER_TEMP/contact-image-settled"
+          test ! -e "$RUNNER_TEMP/contact-image-build-started"
+          for marker in contact-image-remove-invoked contact-image-remove-settled; do
+            test ! -e "$RUNNER_TEMP/$marker"
+            test ! -L "$RUNNER_TEMP/$marker"
+          done
+          docker info >/dev/null
+          tags="$(docker image ls --format '{{.Repository}}:{{.Tag}}')"
+          if grep -Fxq -- "$tag" <<< "$tags"; then
+            echo 'Unique run tag already exists; refusing to overwrite' >&2
+            exit 1
+          fi
+          : > "$RUNNER_TEMP/contact-image-build-started"
+          DOCKER_BUILDKIT=1 docker build --progress=plain --iidfile "$RUNNER_TEMP/contact-image-id" \
             --tag "$tag" --file Legacy.Maliev.ContactService.Api/Dockerfile . 2>&1 | tee "$RUNNER_TEMP/contact-image-build.log"
           iid="$(cat "$RUNNER_TEMP/contact-image-id")"
           [[ "$iid" =~ ^sha256:[0-9a-f]{64}$ ]]
           test "$(docker image inspect --format '{{.Id}}' "$tag")" = "$iid"
           printf '%s\n' "$iid" > "$RUNNER_TEMP/contact-image-settled"
+          for base in sdk:11.0 aspnet:11.0; do
+            matches="$(grep -E "^#[0-9]+ \[[^]]+\] FROM mcr[.]microsoft[.]com/dotnet/${base}@sha256:[0-9a-f]{64}" "$RUNNER_TEMP/contact-image-build.log" | grep -Eo "mcr[.]microsoft[.]com/dotnet/${base}@sha256:[0-9a-f]{64}" | sort -u)"
+            [[ "$(printf '%s\n' "$matches" | wc -l)" -eq 1 && "$matches" =~ @sha256:[0-9a-f]{64}$ ]]
+            printf 'Resolved base: %s\n' "$matches"
+          done
           if grep -E '(^|[[:space:]])warning (CS|NU|MSB|NETSDK)[0-9]+' "$RUNNER_TEMP/contact-image-build.log"; then
             echo 'Compiler or package warnings found' >&2
             exit 1
           fi
           printf 'Built head=%s image=%s tag=%s\n' "$EXPECTED_HEAD" "$iid" "$tag"
-      - name: Remove exact owned image tag
-        if: always()
+      - name: Admit startup with cleanup reserve
+        timeout-minutes: 1
+        run: python3 -I -B tooling/contact-image-deadline-public.py startup
+      - name: Verify isolated application liveness
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          iid="$(cat "$RUNNER_TEMP/contact-image-settled")"
+          [[ "$iid" =~ ^sha256:[0-9a-f]{64}$ ]]
+          owner="contact-startup-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cidfile="$RUNNER_TEMP/contact-startup-cid"
+          for suffix in cid create-output inspect.json isolation.json create-invoked create-settled start-invoked start-settled probe-invoked probe-output probe-settled stop-invoked stop-settled remove-invoked remove-settled cleaned; do
+            test ! -e "$RUNNER_TEMP/contact-startup-$suffix"
+          done
+          docker info >/dev/null
+          names="$(docker ps -a --format '{{.Names}}')"
+          if grep -Fxq -- "$owner" <<< "$names"; then
+            echo 'Container name already exists; refusing to claim it' >&2
+            exit 1
+          fi
+          public_key="$(openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 2>/dev/null | openssl pkey -pubout 2>/dev/null | base64 -w0)"
+          test -n "$public_key"
+          : > "$RUNNER_TEMP/contact-startup-create-invoked"
+          timeout --signal=TERM --kill-after=5s 20s docker create \
+            --name "$owner" --label "io.maliev.owner=$owner" \
+            --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --memory 512m --cpus 1 --pids-limit 128 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777 \
+            --env ASPNETCORE_ENVIRONMENT=Testing \
+            --env ASPNETCORE_URLS=http://127.0.0.1:8080 \
+            --env Cache__RedisEnabled=false --env OTEL_EXPORTER_OTLP_ENDPOINT= \
+            --env Observability__TracingEnabled=false --env Observability__RuntimeMetricsEnabled=false \
+            --env HOME=/tmp \
+            --env Jwt__Issuer=https://startup.example.test --env Jwt__Audience=startup-control \
+            --env "Jwt__PublicKey=$public_key" --env CORS__AllowedOrigins__0=https://startup.example.test \
+            --env 'ConnectionStrings__ContactRequestDbContext=Host=127.0.0.1;Port=1;Database=contact_probe;Username=probe;Timeout=1' \
+            --cidfile "$cidfile" "$iid" > "$RUNNER_TEMP/contact-startup-create-output"
+          cid="$(cat "$cidfile")"
+          [[ "$cid" =~ ^[0-9a-f]{64}$ ]]
+          test "$(cat "$RUNNER_TEMP/contact-startup-create-output")" = "$cid"
+          timeout 10s docker inspect "$cid" > "$RUNNER_TEMP/contact-startup-inspect.json"
+          IID="$iid" OWNER="$owner" CID="$cid" python3 -B - "$RUNNER_TEMP/contact-startup-inspect.json" "$RUNNER_TEMP/contact-startup-isolation.json" <<'PY'
+          import json, os, sys
+          rows = json.load(open(sys.argv[1], encoding='utf-8'))
+          if len(rows) != 1: raise SystemExit('expected one container')
+          c = rows[0]; h = c['HostConfig']; labels = c['Config']['Labels'] or {}
+          env = dict(item.split('=', 1) for item in c['Config']['Env'] if '=' in item)
+          expected_env = {'ASPNETCORE_ENVIRONMENT': 'Testing', 'ASPNETCORE_URLS': 'http://127.0.0.1:8080',
+                          'Cache__RedisEnabled': 'false', 'OTEL_EXPORTER_OTLP_ENDPOINT': '',
+                          'Observability__TracingEnabled': 'false', 'Observability__RuntimeMetricsEnabled': 'false',
+                          'HOME': '/tmp', 'ConnectionStrings__ContactRequestDbContext': 'Host=127.0.0.1;Port=1;Database=contact_probe;Username=probe;Timeout=1',
+                          'Jwt__Issuer': 'https://startup.example.test', 'Jwt__Audience': 'startup-control',
+                          'CORS__AllowedOrigins__0': 'https://startup.example.test'}
+          ok = (c['Id'] == os.environ['CID'] and c['Image'] == os.environ['IID']
+                and c['Name'] == '/' + os.environ['OWNER'] and labels.get('io.maliev.owner') == os.environ['OWNER']
+                and h['NetworkMode'] == 'none' and h['ReadonlyRootfs'] is True
+                and not h.get('Binds') and not h.get('PortBindings')
+                and h['Memory'] == 536870912 and h['NanoCpus'] == 1000000000 and h['PidsLimit'] == 128
+                and 'ALL' in (h.get('CapDrop') or []) and 'no-new-privileges' in (h.get('SecurityOpt') or [])
+                and h.get('Tmpfs') == {'/tmp': 'rw,noexec,nosuid,nodev,size=16m,mode=1777'}
+                and (c['Config']['User'] or '').split(':', 1)[0] not in ('', '0', 'root')
+                and c['Config']['Entrypoint'] == ['dotnet', 'Legacy.Maliev.ContactService.Api.dll']
+                and all(env.get(key) == value for key, value in expected_env.items())
+                and bool(env.get('Jwt__PublicKey')) and env.get('DOTNET_ROLL_FORWARD') == 'Major'
+                and all(m.get('Type') == 'tmpfs' and m.get('Destination') == '/tmp' for m in c['Mounts']))
+          if not ok: raise SystemExit('container ownership or isolation mismatch')
+          with open(sys.argv[2], 'x', encoding='utf-8') as output:
+              json.dump({'containerId': c['Id'], 'imageId': c['Image'], 'owner': os.environ['OWNER'],
+                         'networkMode': h['NetworkMode'], 'readOnlyRoot': h['ReadonlyRootfs'],
+                         'tmpfs': h['Tmpfs'], 'memory': h['Memory'], 'nanoCpus': h['NanoCpus'],
+                         'pidsLimit': h['PidsLimit'], 'user': c['Config']['User'],
+                         'noBindsOrPorts': True, 'capDropAll': True, 'noNewPrivileges': True,
+                         'syntheticConfigurationMatched': True}, output, sort_keys=True)
+          PY
+          : > "$RUNNER_TEMP/contact-startup-create-settled"
+          : > "$RUNNER_TEMP/contact-startup-start-invoked"
+          timeout --signal=TERM --kill-after=5s 20s docker start "$cid"
+          : > "$RUNNER_TEMP/contact-startup-start-settled"
+          test "$(timeout 10s docker inspect --format '{{.State.Running}}' "$cid")" = true
+          : > "$RUNNER_TEMP/contact-startup-probe-invoked"
+          set +e
+          timeout --signal=TERM --kill-after=5s 35s docker exec -i "$cid" /bin/bash -s > "$RUNNER_TEMP/contact-startup-probe-output" 2>&1 <<'PROBE'
+          set -uo pipefail
+          trap 'status=$?; printf "CONTACT_PROBE_EXIT=%s\\n" "$status"' EXIT
+          for tool in head od tr grep dotnet; do command -v "$tool" >/dev/null || exit 1; done
+          dotnet --list-runtimes | grep -Eq '^Microsoft[.]NETCore[.]App 11[.]' || exit 1
+          dotnet --list-runtimes | grep -Eq '^Microsoft[.]AspNetCore[.]App 11[.]' || exit 1
+          if dotnet --list-runtimes | grep -Ev '^(Microsoft[.]NETCore[.]App|Microsoft[.]AspNetCore[.]App) 11[.]'; then exit 1; fi
+          for attempt in {1..30}; do
+            if { exec 3<>/dev/tcp/127.0.0.1/8080; } 2>/dev/null; then
+              printf 'GET /messages/liveness HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n' >&3
+              response="$(head -c 8193 <&3 | od -An -tx1 -v | tr -d ' \n')" || exit 1
+              [[ ${#response} -le 16384 && "$response" =~ ^[0-9a-f]+$ ]] || exit 1
+              [[ "$response" == 485454502f312e3020323030204f4b0d0a* || "$response" == 485454502f312e3120323030204f4b0d0a* ]] || exit 1
+              [[ "$response" == *0d0a0d0a* ]] || exit 1
+              headers="${response%%0d0a0d0a*}"
+              body="${response#*0d0a0d0a}"
+              for ((i=0; i<${#headers}; i+=2)); do
+                byte="${headers:i:2}"
+                [[ "$byte" =~ ^(09|0a|0d|[2-6][0-9a-f]|7[0-9a-e])$ ]] || exit 1
+              done
+              [[ "$body" == 4865616c746879 ]] || exit 1
+              grep -Eq '/shared/Microsoft[.]NETCore[.]App/11[.][^/]+/libcoreclr[.]so' /proc/1/maps || exit 1
+              grep -Eq '/shared/Microsoft[.]AspNetCore[.]App/11[.][^/]+/Microsoft[.]AspNetCore[.][^ ]+[.]dll' /proc/1/maps || exit 1
+              exit 0
+            fi
+            sleep 0.5
+          done
+          exit 1
+          PROBE
+          code=$?
+          set -e
+          if [[ "$code" -eq 124 || "$code" -eq 137 ]] || ! grep -Fxq "CONTACT_PROBE_EXIT=$code" "$RUNNER_TEMP/contact-startup-probe-output"; then
+            echo 'Probe command settlement is unproved' >&2
+            exit 1
+          fi
+          : > "$RUNNER_TEMP/contact-startup-probe-settled"
+          test "$code" -eq 0
+          test "$(timeout 10s docker inspect --format '{{.State.Running}}' "$cid")" = true
+          printf 'Liveness HTTP 200 Healthy container=%s image=%s\n' "$cid" "$iid"
+      - name: Remove exact owned startup container
+        if: always() && steps.receipt_preflight.outputs.admitted == 'true'
         timeout-minutes: 2
         shell: bash
         run: |
           set -euo pipefail
+          test -d "$RUNNER_TEMP/contact61-receipts-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if ! test -e "$RUNNER_TEMP/contact-startup-create-invoked"; then
+            echo 'No container creation was invoked.'
+            exit 0
+          fi
+          test -e "$RUNNER_TEMP/contact-startup-create-settled" || { echo 'Container create settlement unproved' >&2; exit 1; }
+          if test -e "$RUNNER_TEMP/contact-startup-start-invoked"; then
+            test -e "$RUNNER_TEMP/contact-startup-start-settled" || { echo 'Container start settlement unproved' >&2; exit 1; }
+          fi
+          if test -e "$RUNNER_TEMP/contact-startup-probe-invoked"; then
+            test -e "$RUNNER_TEMP/contact-startup-probe-settled" || { echo 'Container probe settlement unproved' >&2; exit 1; }
+          fi
+          cid="$(cat "$RUNNER_TEMP/contact-startup-cid")"
+          iid="$(cat "$RUNNER_TEMP/contact-image-settled")"
+          owner="contact-startup-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ "$cid" =~ ^[0-9a-f]{64}$ && "$iid" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$(timeout 10s docker inspect --format '{{.Image}}|{{.Name}}|{{index .Config.Labels "io.maliev.owner"}}' "$cid")" = "$iid|/$owner|$owner"
+          : > "$RUNNER_TEMP/contact-startup-stop-invoked"
+          timeout --signal=TERM --kill-after=5s 15s docker stop --time 5 "$cid"
+          test "$(timeout 10s docker inspect --format '{{.State.Running}}' "$cid")" = false
+          : > "$RUNNER_TEMP/contact-startup-stop-settled"
+          : > "$RUNNER_TEMP/contact-startup-remove-invoked"
+          timeout --signal=TERM --kill-after=5s 15s docker rm "$cid"
+          docker info >/dev/null
+          ids="$(docker ps -a --no-trunc --format '{{.ID}}')"
+          if grep -Fxq -- "$cid" <<< "$ids"; then echo 'Owned container remains' >&2; exit 1; fi
+          : > "$RUNNER_TEMP/contact-startup-remove-settled"
+          : > "$RUNNER_TEMP/contact-startup-cleaned"
+          printf 'Removed owned container=%s image=%s\n' "$cid" "$iid"
+      - name: Remove exact owned image tag
+        if: always() && steps.receipt_preflight.outputs.admitted == 'true'
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d "$RUNNER_TEMP/contact61-receipts-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           tag="contact-image-build:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if test -e "$RUNNER_TEMP/contact-startup-create-invoked"; then
+            test -e "$RUNNER_TEMP/contact-startup-cleaned" || { echo 'Container custody unresolved; retaining image tag' >&2; exit 1; }
+          fi
+          if ! test -e "$RUNNER_TEMP/contact-image-build-started"; then
+            echo 'Build was not invoked; no image is owned by this job.'
+            exit 0
+          fi
           if ! test -s "$RUNNER_TEMP/contact-image-settled"; then
             echo 'Build settlement marker absent; daemon/image custody remains unverified' >&2
             exit 1
@@ -76,10 +283,42 @@ jobs:
           [[ "$iid" =~ ^sha256:[0-9a-f]{64}$ ]]
           test "$(cat "$RUNNER_TEMP/contact-image-settled")" = "$iid"
           test "$(docker image inspect --format '{{.Id}}' "$tag")" = "$iid"
-          docker image rm "$tag"
+          : > "$RUNNER_TEMP/contact-image-remove-invoked"
+          timeout --signal=TERM --kill-after=5s 15s docker image rm "$tag"
           docker info >/dev/null
-          if docker image inspect "$tag" >/dev/null 2>&1; then
+          tags="$(docker image ls --format '{{.Repository}}:{{.Tag}}')"
+          if grep -Fxq -- "$tag" <<< "$tags"; then
             echo 'Owned image tag remains' >&2
             exit 1
           fi
+          : > "$RUNNER_TEMP/contact-image-remove-settled"
           printf 'Removed exact tag=%s for image=%s; runner/daemon destruction not asserted\n' "$tag" "$iid"
+      - name: Retain bounded startup custody
+        timeout-minutes: 2
+        if: always() && steps.receipt_preflight.outputs.admitted == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: contact-image-startup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/contact-image-id
+            ${{ runner.temp }}/contact-image-settled
+            ${{ runner.temp }}/contact-image-build-started
+            ${{ runner.temp }}/contact-image-remove-invoked
+            ${{ runner.temp }}/contact-image-remove-settled
+            ${{ runner.temp }}/contact-startup-cid
+            ${{ runner.temp }}/contact-startup-create-output
+            ${{ runner.temp }}/contact-startup-isolation.json
+            ${{ runner.temp }}/contact-startup-create-invoked
+            ${{ runner.temp }}/contact-startup-create-settled
+            ${{ runner.temp }}/contact-startup-start-invoked
+            ${{ runner.temp }}/contact-startup-start-settled
+            ${{ runner.temp }}/contact-startup-probe-invoked
+            ${{ runner.temp }}/contact-startup-probe-output
+            ${{ runner.temp }}/contact-startup-probe-settled
+            ${{ runner.temp }}/contact-startup-stop-invoked
+            ${{ runner.temp }}/contact-startup-stop-settled
+            ${{ runner.temp }}/contact-startup-remove-invoked
+            ${{ runner.temp }}/contact-startup-remove-settled
+            ${{ runner.temp }}/contact-startup-cleaned
+          if-no-files-found: warn
+          retention-days: 7

@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Runtime.ExceptionServices;
+using Xunit.Abstractions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 
@@ -13,7 +15,7 @@ public sealed class StartupCollection;
 
 /// <summary>Verifies private startup failure reporting, normal host interception, and unchanged host-abort behavior.</summary>
 [Collection("Contact startup state")]
-public sealed class StartupFailureAcceptanceTests
+public sealed class StartupFailureAcceptanceTests(ITestOutputHelper output)
 {
     private const string Sentinel = "private-startup-test-sentinel";
 
@@ -28,6 +30,8 @@ public sealed class StartupFailureAcceptanceTests
     {
         var root = Path.Combine(Path.GetTempPath(), Sentinel + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
+        var child = new Process();
+        var custody = new StartupCustody(child, root);
         try
         {
             File.WriteAllText(Path.Combine(root, "appsettings.json"), phase == "host-start"
@@ -53,24 +57,72 @@ public sealed class StartupFailureAcceptanceTests
             start.Environment.Clear();
             foreach (var (key, value) in benign)
                 if (value is not null) start.Environment[key] = value;
+            var requireRuntime11 = Environment.GetEnvironmentVariable("CONTACT_REQUIRED_RUNTIME_MAJOR") == "11";
+            var runtimeReceipt = Path.Combine(root, "runtime-identity.json");
+            var testAssembly = typeof(StartupFailureAcceptanceTests).Assembly.Location;
+            if (requireRuntime11)
+            {
+                var run = Environment.GetEnvironmentVariable("GITHUB_RUN_ID");
+                var attempt = Environment.GetEnvironmentVariable("GITHUB_RUN_ATTEMPT");
+                Assert.Matches("^[1-9][0-9]*$", run ?? "");
+                Assert.Matches("^[1-9][0-9]*$", attempt ?? "");
+                start.Environment["DOTNET_ROLL_FORWARD"] = "LatestMajor";
+                start.Environment["DOTNET_STARTUP_HOOKS"] = testAssembly;
+                start.Environment["CONTACT_RUNTIME_RECEIPT"] = runtimeReceipt;
+                start.Environment["CONTACT_RUNTIME_RUN"] = run + ":" + attempt;
+            }
             foreach (var argument in new[] { api, "--environment=Production", "--contentRoot=" +
                 (phase == "missing-root" ? Path.Combine(root, Sentinel) : root) }) start.ArgumentList.Add(argument);
             if (phase == "host-start") start.ArgumentList.Add("--urls=http://127.0.0.1:0/" + Sentinel);
-            using var child = Process.Start(start) ?? throw new InvalidOperationException("Owned test process did not start.");
-            var stdout = child.StandardOutput.ReadToEndAsync();
-            var stderr = child.StandardError.ReadToEndAsync();
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            try { await child.WaitForExitAsync(deadline.Token); }
+            child.StartInfo = start;
+            custody.DeclaredExecutable = start.FileName;
+            custody.StartAttempted = true;
+            custody.StartResult = child.Start();
+            Assert.True(custody.StartResult.Value);
+            custody.StdoutReader = child.StandardOutput;
+            custody.Stdout = ReadBoundedAsync(custody.StdoutReader, custody.Readers.Token);
+            custody.StderrReader = child.StandardError;
+            custody.Stderr = ReadBoundedAsync(custody.StderrReader, custody.Readers.Token);
+            custody.Pid = child.Id;
+            custody.Birth = child.StartTime.ToUniversalTime();
+            ObserveOwnedExecutable(custody);
+            if (requireRuntime11)
+            {
+                await ContactRuntimeProcessIdentity.AwaitReceiptAsync(
+                    () => File.Exists(runtimeReceipt), () => child.HasExited, custody.Readers.Token);
+                var ticks = ContactRuntimeProcessIdentity.ParseStartTicks(
+                    await File.ReadAllTextAsync($"/proc/{child.Id}/stat", custody.Readers.Token));
+                using var identity = JsonDocument.Parse(await File.ReadAllTextAsync(runtimeReceipt, custody.Readers.Token));
+                var observed = identity.RootElement;
+                Assert.Equal(child.Id, observed.GetProperty("pid").GetInt32());
+                Assert.Equal(ticks, observed.GetProperty("startTicks").GetUInt64());
+                Assert.Equal(start.Environment["CONTACT_RUNTIME_RUN"], observed.GetProperty("run").GetString());
+                Assert.Equal(testAssembly, observed.GetProperty("hookPath").GetString());
+                Assert.Equal(Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(testAssembly, custody.Readers.Token))),
+                    observed.GetProperty("hookSha256").GetString());
+                Assert.Equal(11, observed.GetProperty("coreMajor").GetInt32());
+                Assert.Equal(11, observed.GetProperty("aspNetMajor").GetInt32());
+                Assert.Equal(typeof(object).Assembly.Location, observed.GetProperty("corePath").GetString());
+                Assert.Equal(typeof(Microsoft.AspNetCore.Builder.WebApplication).Assembly.Location,
+                    observed.GetProperty("aspNetPath").GetString());
+                Assert.False(child.HasExited, "Runtime identity child exited during inspection.");
+                var pending = runtimeReceipt + ".ack.pending";
+                await using (var file = new FileStream(pending, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                await using (var writer = new StreamWriter(file))
+                    await writer.WriteAsync($"{start.Environment["CONTACT_RUNTIME_RUN"]}|{child.Id}|{ticks}");
+                File.Move(pending, runtimeReceipt + ".ack");
+            }
+            try { await child.WaitForExitAsync(custody.Readers.Token); }
             catch (OperationCanceledException)
             {
-                if (!child.HasExited) child.Kill(entireProcessTree: true);
-                await child.WaitForExitAsync();
                 throw new TimeoutException("Owned child startup timed out; this is not behavioral failure evidence.");
             }
+            var stdout = custody.Stdout!;
+            var stderr = custody.Stderr!;
             Assert.Equal(1, child.ExitCode);
-            var capturedStdout = await stdout;
+            var capturedStdout = await stdout.WaitAsync(custody.Readers.Token);
             if (phase != "host-start") Assert.Equal(string.Empty, capturedStdout);
-            var raw = capturedStdout + await stderr;
+            var raw = capturedStdout + await stderr.WaitAsync(custody.Readers.Token);
             Assert.DoesNotContain(Sentinel, raw, StringComparison.Ordinal);
             Assert.DoesNotContain("Unhandled exception", raw, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("StackTrace", raw, StringComparison.OrdinalIgnoreCase);
@@ -94,7 +146,42 @@ public sealed class StartupFailureAcceptanceTests
             Assert.False(json.RootElement.TryGetProperty("State", out _));
             Assert.False(json.RootElement.TryGetProperty("Scopes", out _));
         }
-        finally { Directory.Delete(root, recursive: true); }
+        catch (Exception error) { custody.Primary = error; }
+        finally
+        {
+            await SettleStartupCustodyAsync(custody);
+            try
+            {
+                output.WriteLine("CONTACT_STARTUP_RESOURCE=" + JsonSerializer.Serialize(new
+                {
+                    owner = "contact-startup-boundary",
+                    custody.Id,
+                    custody.Pid,
+                    custody.Birth,
+                    custody.Executable,
+                    custody.DeclaredExecutable,
+                    custody.ExecutableObservation,
+                    timeoutSeconds = 20,
+                    stopTimeoutSeconds = 5,
+                    readerSettlementSeconds = 5,
+                    streamCharacterBound = OutputCharacterBound,
+                    custody.ExitVerified,
+                    stdoutSettled = custody.Stdout?.IsCompleted ?? true,
+                    stderrSettled = custody.Stderr?.IsCompleted ?? true,
+                    custody.ProcessDisposed,
+                    custody.ReadersDisposed,
+                    custody.DirectoryRemoved,
+                    recoveryRequired = !custody.Released,
+                    custody.LeaseExpiresUtc,
+                    primaryFailureType = custody.Primary?.GetType().Name,
+                    cleanupFailureTypes = custody.CleanupFailures.Select(exception => exception.GetType().Name).ToArray(),
+                    persistentData = false,
+                }));
+            }
+            catch (Exception error) { custody.CleanupFailures.Add(error); }
+        }
+        if (custody.FailureForCaller() is { } failureForCaller)
+            ExceptionDispatchInfo.Capture(failureForCaller).Throw();
     }
 
     /// <summary>Checks that in-process configuration failures are contained and reported privately while setting exit code one.</summary>
@@ -273,4 +360,450 @@ public sealed class StartupFailureAcceptanceTests
             host?.Dispose();
         }
     }
+
+    private const int OutputCharacterBound = 65536;
+    private static readonly Dictionary<string, StartupCustody> RetainedStartupChildren = [];
+
+    /// <summary>Verifies the bounded reader accepts only output within its limit.</summary>
+    /// <param name="count">The synthetic output length.</param>
+    /// <param name="accepted">Whether the output should be accepted.</param>
+    /// <returns>A task that completes when the custody control has finished.</returns>
+    [Theory]
+    [InlineData(OutputCharacterBound, true)]
+    [InlineData(OutputCharacterBound + 1, false)]
+    public async Task StreamingReader_EnforcesBoundWithoutTruncatingAssertions(int count, bool accepted)
+    {
+        using var reader = new StringReader(new string('x', count));
+        if (accepted) Assert.Equal(count, (await ReadBoundedAsync(reader, CancellationToken.None)).Length);
+        else await Assert.ThrowsAsync<InvalidDataException>(() => ReadBoundedAsync(reader, CancellationToken.None));
+    }
+
+    /// <summary>Verifies ambiguous child startup retains custody and its primary failure.</summary>
+    /// <returns>A task that completes when the custody control has finished.</returns>
+    [Fact]
+    public async Task PartialStartUncertainty_RetainsExactHandleDirectoryAndOriginalFailure()
+    {
+        var custody = ControlCustody();
+        custody.StartAttempted = true;
+        // No Start is actually called in this control: emulate failure before metadata is available.
+        custody.StartResult = null;
+        var primary = new IOException("synthetic primary startup failure");
+        custody.Primary = primary;
+        try
+        {
+            await SettleStartupCustodyAsync(custody);
+            Assert.False(custody.Released);
+            Assert.False(custody.ProcessDisposed);
+            Assert.True(Directory.Exists(custody.Directory));
+            Assert.Same(custody, RetainedStartupChildren[custody.Id]);
+            var aggregate = Assert.IsType<AggregateException>(custody.FailureForCaller());
+            Assert.Same(primary, aggregate.InnerExceptions[0]);
+            Assert.NotEmpty(custody.CleanupFailures);
+        }
+        finally
+        {
+            // This control never called Start; that local evidence allows releasing its unstarted handle.
+            custody.StartAttempted = false;
+            custody.StartResult = false;
+            await SettleStartupCustodyAsync(custody);
+        }
+        Assert.True(custody.Released);
+        Assert.False(RetainedStartupChildren.ContainsKey(custody.Id));
+
+        var cancelledCustody = ControlCustody();
+        try
+        {
+            using var cancelled = new CancellationTokenSource();
+            cancelled.Cancel();
+            await ContactRuntimeProcessIdentity.AwaitReceiptAsync(() => false, () => false, cancelled.Token);
+        }
+        catch (OperationCanceledException exception) { cancelledCustody.Primary = exception; }
+        finally { await SettleStartupCustodyAsync(cancelledCustody); }
+        Assert.True(cancelledCustody.Released);
+        Assert.IsAssignableFrom<OperationCanceledException>(cancelledCustody.FailureForCaller());
+    }
+
+    /// <summary>Verifies cleanup waits for both owned output readers.</summary>
+    /// <returns>A task that completes when the custody control has finished.</returns>
+    [Fact]
+    public async Task UnsettledReaders_PreventDisposalAndRemovalUntilBothActuallyFinish()
+    {
+        var custody = ControlCustody();
+        var stdout = new GateReader();
+        var stderr = new GateReader();
+        custody.StdoutReader = stdout;
+        custody.StderrReader = stderr;
+        custody.Stdout = ReadBoundedAsync(stdout, custody.Readers.Token);
+        custody.Stderr = ReadBoundedAsync(stderr, custody.Readers.Token);
+        try
+        {
+            await SettleStartupCustodyAsync(custody);
+            Assert.False(custody.ProcessDisposed);
+            Assert.False(stdout.IsDisposed);
+            Assert.False(stderr.IsDisposed);
+            Assert.True(Directory.Exists(custody.Directory));
+            Assert.Contains(custody.CleanupFailures, exception => exception is TimeoutException);
+            stdout.Release();
+            await custody.Stdout;
+            await SettleStartupCustodyAsync(custody);
+            Assert.False(custody.ProcessDisposed);
+            Assert.True(Directory.Exists(custody.Directory));
+            Assert.False(custody.Stderr.IsCompleted);
+        }
+        finally
+        {
+            stdout.Release();
+            stderr.Release();
+            await Task.WhenAll(custody.Stdout, custody.Stderr).WaitAsync(TimeSpan.FromSeconds(5));
+            await SettleStartupCustodyAsync(custody);
+        }
+        Assert.True(custody.Released);
+        Assert.True(custody.ProcessDisposed);
+        Assert.True(stdout.IsDisposed);
+        Assert.True(stderr.IsDisposed);
+        Assert.False(Directory.Exists(custody.Directory));
+    }
+
+    /// <summary>Verifies directory cleanup errors preserve the primary failure.</summary>
+    /// <returns>A task that completes when the custody control has finished.</returns>
+    [Fact]
+    public async Task DirectoryCleanupFailure_PreservesPrimaryAndEveryCleanupFailureForRecovery()
+    {
+        var custody = ControlCustody();
+        var primary = new IOException("synthetic primary failure");
+        var removal = new IOException("synthetic private-directory cleanup failure");
+        var secondRemoval = new IOException("synthetic second private-directory cleanup failure");
+        custody.Primary = primary;
+        custody.DirectoryRemovalFault = removal;
+        try
+        {
+            await SettleStartupCustodyAsync(custody);
+            Assert.True(custody.ProcessDisposed); // Exit/readers already settled; handle release is safe.
+            Assert.True(Directory.Exists(custody.Directory));
+            Assert.False(custody.Released);
+            Assert.Same(custody, RetainedStartupChildren[custody.Id]);
+            var aggregate = Assert.IsType<AggregateException>(custody.FailureForCaller());
+            Assert.Same(primary, aggregate.InnerExceptions[0]);
+            Assert.Contains(removal, aggregate.InnerExceptions);
+            custody.DirectoryRemovalFault = secondRemoval;
+            await SettleStartupCustodyAsync(custody);
+            Assert.Equal(new Exception[] { primary, removal, secondRemoval },
+                Assert.IsType<AggregateException>(custody.FailureForCaller()).InnerExceptions);
+        }
+        finally
+        {
+            custody.DirectoryRemovalFault = null;
+            await SettleStartupCustodyAsync(custody);
+        }
+        Assert.True(custody.Released);
+        Assert.Same(primary, Assert.IsType<AggregateException>(custody.FailureForCaller()).InnerExceptions[0]);
+    }
+
+    /// <summary>Verifies executable observation records the available module.</summary>
+    [Fact]
+    public void ExecutableObservation_PresentModuleRecordsObservedIdentity()
+    {
+        var observation = ObserveExecutable(() => "/observed/dotnet", () => false);
+        Assert.Equal("/observed/dotnet", observation.Executable);
+        Assert.False(observation.Exited);
+    }
+
+    /// <summary>Verifies a missing module requires a confirmed process exit.</summary>
+    [Fact]
+    public void ExecutableObservation_AbsentModuleRequiresVerifiedExit()
+    {
+        var observation = ObserveExecutable(() => null, () => true);
+        Assert.Null(observation.Executable);
+        Assert.True(observation.Exited);
+        var empty = ObserveExecutable(() => string.Empty, () => true);
+        Assert.Equal(string.Empty, empty.Executable);
+        Assert.True(empty.Exited);
+    }
+
+    /// <summary>Verifies a live process without an observable module is rejected.</summary>
+    [Fact]
+    public void ExecutableObservation_AbsentLiveModuleFailsWithoutLaunchFallback()
+    {
+        Assert.Throws<InvalidOperationException>(() => ObserveExecutable(() => null, () => false));
+        Assert.Throws<InvalidOperationException>(() => ObserveExecutable(() => string.Empty, () => false));
+    }
+
+    /// <summary>Verifies an exit observation failure retains its cause.</summary>
+    [Fact]
+    public void ExecutableObservation_ExitQueryFailurePreservesCause()
+    {
+        var cause = new IOException("exit observation failed");
+        Assert.Same(cause, Assert.Throws<IOException>(() => ObserveExecutable(() => null, () => throw cause)));
+    }
+
+    /// <summary>Verifies a module observation failure retains its cause.</summary>
+    [Fact]
+    public void ExecutableObservation_ModuleQueryFailurePreservesCause()
+    {
+        var cause = new InvalidOperationException("module observation failed");
+        var exitQueried = false;
+        Assert.Same(cause, Assert.Throws<InvalidOperationException>(() => ObserveExecutable(() => throw cause,
+            () => { exitQueried = true; return true; })));
+        Assert.False(exitQueried);
+    }
+
+    /// <summary>Verifies a process exit prevents a stale termination decision.</summary>
+    [Fact]
+    public void ExecutableObservation_ExitBetweenObservationsPreventsTerminationDecision()
+    {
+        var first = ObserveExecutable(() => "/observed/dotnet", () => false);
+        var cleanup = ObserveExecutable(() => null, () => true);
+        Assert.False(first.Exited);
+        Assert.True(cleanup.Exited);
+        Assert.Null(cleanup.Executable);
+        Assert.False(ShouldTerminateAfterObservation(cleanup.Exited,
+            () => throw new InvalidOperationException("Verified exit must short-circuit termination.")));
+        Assert.False(ShouldTerminateAfterObservation(first.Exited, () => true));
+        Assert.True(ShouldTerminateAfterObservation(first.Exited, () => false));
+    }
+
+    /// <summary>Verifies cleanup observation failures follow the primary error.</summary>
+    [Fact]
+    public void ExecutableObservation_PrimaryPrecedesCleanupObservationFailure()
+    {
+        using var process = new Process();
+        var custody = new StartupCustody(process, string.Empty);
+        using var readers = custody.Readers;
+        var primary = new IOException("original failure");
+        custody.Primary = primary;
+        var cleanup = Assert.Throws<InvalidOperationException>(() => ObserveExecutable(() => null, () => false));
+        custody.CleanupFailures.Add(cleanup);
+        var failure = Assert.IsType<AggregateException>(custody.FailureForCaller());
+        Assert.Equal(2, failure.InnerExceptions.Count);
+        Assert.Same(primary, failure.InnerExceptions[0]);
+        Assert.Same(cleanup, failure.InnerExceptions[1]);
+    }
+
+    /// <summary>Verifies reader failures and the primary error are preserved.</summary>
+    /// <returns>A task that completes when the custody control has finished.</returns>
+    [Fact]
+    public async Task ReaderFailure_PreservesPrimaryAndOriginalReaderError()
+    {
+        var custody = ControlCustody();
+        var primary = new IOException("synthetic primary failure");
+        var readerFailure = new IOException("synthetic reader failure");
+        custody.Primary = primary;
+        custody.StdoutReader = new FaultReader(readerFailure);
+        custody.Stdout = ReadBoundedAsync(custody.StdoutReader, custody.Readers.Token);
+        await SettleStartupCustodyAsync(custody);
+        Assert.True(custody.Released);
+        var aggregate = Assert.IsType<AggregateException>(custody.FailureForCaller());
+        Assert.Same(primary, aggregate.InnerExceptions[0]);
+        Assert.Contains(readerFailure, aggregate.InnerExceptions);
+    }
+
+    /// <summary>Verifies a confirmed unstarted process can be released safely.</summary>
+    /// <returns>A task that completes when the custody control has finished.</returns>
+    [Fact]
+    public async Task FailedStart_ReleasesKnownUnstartedProcessAndPreservesPrimary()
+    {
+        var custody = ControlCustody();
+        custody.StartAttempted = true;
+        custody.StartResult = false;
+        var primary = new IOException("synthetic failed start");
+        custody.Primary = primary;
+        await SettleStartupCustodyAsync(custody);
+        Assert.True(custody.Released);
+        Assert.Same(primary, custody.FailureForCaller());
+        Assert.False(Directory.Exists(custody.Directory));
+    }
+
+    private static async Task<string> ReadBoundedAsync(TextReader reader, CancellationToken token)
+    {
+        var text = new StringBuilder();
+        var buffer = new char[1024];
+        while (true)
+        {
+            var count = await reader.ReadAsync(buffer.AsMemory(), token);
+            if (count == 0) return text.ToString();
+            if (text.Length + count > OutputCharacterBound)
+                throw new InvalidDataException("Startup diagnostic stream exceeded its fixed bound.");
+            text.Append(buffer, 0, count);
+        }
+    }
+
+    private static (string? Executable, bool Exited) ObserveExecutable(Func<string?> module, Func<bool> exited)
+    {
+        // Declared launch paths are never evidence of a live process image.
+        // Query exceptions propagate unchanged; only an absent module with verified exit is expected.
+        var executable = module();
+        var exitVerified = exited();
+        if (string.IsNullOrEmpty(executable) && !exitVerified)
+            throw new InvalidOperationException("Live owned startup child executable could not be observed.");
+        return (executable, exitVerified);
+    }
+
+    private static bool ObserveOwnedExecutable(StartupCustody custody)
+    {
+        var observation = ObserveExecutable(() => custody.Process.MainModule?.FileName, () => custody.Process.HasExited);
+        if (!string.IsNullOrEmpty(observation.Executable)) custody.Executable = observation.Executable;
+        custody.ExecutableObservation = string.IsNullOrEmpty(observation.Executable) ? "exited-before-module-observation" : "observed-module";
+        return observation.Exited;
+    }
+
+    private static bool ShouldTerminateAfterObservation(bool exitedDuringObservation, Func<bool> exited)
+        => !exitedDuringObservation && !exited();
+
+    private static async Task SettleStartupCustodyAsync(StartupCustody custody)
+    {
+        if (!custody.ProcessDisposed)
+        {
+            try
+            {
+                custody.ExitVerified = !custody.StartAttempted || custody.StartResult == false || custody.Process.HasExited;
+                if (!custody.ExitVerified)
+                {
+                    using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    try { custody.Process.CloseMainWindow(); } // Graceful attempt on the retained owned handle first.
+                    catch (Exception exception) { custody.CleanupFailures.Add(exception); }
+                    using var graceful = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
+                    graceful.CancelAfter(TimeSpan.FromSeconds(1));
+                    try { await custody.Process.WaitForExitAsync(graceful.Token); }
+                    catch (OperationCanceledException) when (graceful.IsCancellationRequested && !stop.IsCancellationRequested) { }
+                    if (!custody.Process.HasExited)
+                    {
+                        // Recover metadata through this same handle if an earlier metadata read failed.
+                        custody.Pid ??= custody.Process.Id;
+                        custody.Birth ??= custody.Process.StartTime.ToUniversalTime();
+                        var exitedDuringObservation = ObserveOwnedExecutable(custody);
+                        if (custody.Process.StartTime.ToUniversalTime() != custody.Birth)
+                            throw new InvalidOperationException("Owned startup child birth changed; termination withheld.");
+                        if (ShouldTerminateAfterObservation(exitedDuringObservation, () => custody.Process.HasExited))
+                            custody.Process.Kill(); // No PID lookup, names or recursive tree selector.
+                        await custody.Process.WaitForExitAsync(stop.Token);
+                    }
+                    custody.ExitVerified = custody.Process.HasExited;
+                }
+            }
+            catch (Exception exception) { custody.CleanupFailures.Add(exception); }
+            finally
+            {
+                if (custody.StartAttempted && custody.StartResult != false)
+                {
+                    try { custody.ExitVerified = custody.Process.HasExited; }
+                    catch (Exception exception) { custody.ExitVerified = false; custody.CleanupFailures.Add(exception); }
+                }
+            }
+            try { custody.Readers.Cancel(); }
+            catch (Exception exception) { custody.CleanupFailures.Add(exception); }
+            var readers = new[] { custody.Stdout, custody.Stderr }.OfType<Task<string>>().ToArray();
+            try { await Task.WhenAll(readers).WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (Exception exception)
+            {
+                if (exception is not OperationCanceledException || readers.Any(task => !task.IsCompleted))
+                    custody.CleanupFailures.Add(exception);
+            }
+            foreach (var task in readers.Where(task => task.IsFaulted))
+                foreach (var exception in task.Exception!.InnerExceptions)
+                    if (!custody.CleanupFailures.Contains(exception)) custody.CleanupFailures.Add(exception);
+            if (custody.ExitVerified && readers.All(task => task.IsCompleted))
+            {
+                if (!custody.StdoutReaderDisposed)
+                {
+                    try { custody.StdoutReader?.Dispose(); custody.StdoutReaderDisposed = true; }
+                    catch (Exception exception) { custody.CleanupFailures.Add(exception); }
+                }
+                if (!custody.StderrReaderDisposed)
+                {
+                    try { custody.StderrReader?.Dispose(); custody.StderrReaderDisposed = true; }
+                    catch (Exception exception) { custody.CleanupFailures.Add(exception); }
+                }
+                try
+                {
+                    if (custody.StdoutReaderDisposed && custody.StderrReaderDisposed)
+                    {
+                        custody.Process.Dispose();
+                        custody.ProcessDisposed = true;
+                    }
+                }
+                catch (Exception exception) { custody.CleanupFailures.Add(exception); }
+            }
+        }
+        if (custody.ExitVerified && (custody.Stdout?.IsCompleted ?? true) && (custody.Stderr?.IsCompleted ?? true) && !custody.ReadersDisposed)
+        {
+            try { custody.Readers.Dispose(); custody.ReadersDisposed = true; }
+            catch (Exception exception) { custody.CleanupFailures.Add(exception); }
+        }
+        if (custody.ProcessDisposed && custody.ReadersDisposed && !custody.DirectoryRemoved)
+        {
+            try
+            {
+                if (custody.DirectoryRemovalFault is { } fault) throw fault;
+                Directory.Delete(custody.Directory, recursive: true);
+                custody.DirectoryRemoved = !Directory.Exists(custody.Directory);
+            }
+            catch (Exception exception) { custody.CleanupFailures.Add(exception); }
+        }
+        if (custody.Released) RetainedStartupChildren.Remove(custody.Id);
+        else RetainedStartupChildren[custody.Id] = custody;
+    }
+
+    private static StartupCustody ControlCustody()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "contact-startup-control-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        return new StartupCustody(new Process(), directory) { StartResult = false };
+    }
+
+    private sealed class StartupCustody(Process process, string directory)
+    {
+        public string Id { get; } = Guid.NewGuid().ToString("N");
+        public Process Process { get; } = process;
+        public string Directory { get; } = directory;
+        public CancellationTokenSource Readers { get; } = new(TimeSpan.FromSeconds(20));
+        public DateTimeOffset LeaseExpiresUtc { get; } = DateTimeOffset.UtcNow.AddSeconds(30);
+        public bool StartAttempted { get; set; }
+        public bool? StartResult { get; set; }
+        public int? Pid { get; set; }
+        public DateTime? Birth { get; set; }
+        public string? Executable { get; set; }
+        public string? DeclaredExecutable { get; set; }
+        public string? ExecutableObservation { get; set; }
+        public Task<string>? Stdout { get; set; }
+        public Task<string>? Stderr { get; set; }
+        public TextReader? StdoutReader { get; set; }
+        public TextReader? StderrReader { get; set; }
+        public bool StdoutReaderDisposed { get; set; }
+        public bool StderrReaderDisposed { get; set; }
+        public Exception? Primary { get; set; }
+        public List<Exception> CleanupFailures { get; } = [];
+        public Exception? DirectoryRemovalFault { get; set; } // Only deterministic fixture controls inject this.
+        public bool ExitVerified { get; set; }
+        public bool ProcessDisposed { get; set; }
+        public bool ReadersDisposed { get; set; }
+        public bool DirectoryRemoved { get; set; }
+        public bool Released => ProcessDisposed && ReadersDisposed && DirectoryRemoved;
+        public Exception? FailureForCaller()
+        {
+            var failures = (Primary is null ? Enumerable.Empty<Exception>() : new[] { Primary! }).Concat(CleanupFailures).ToArray();
+            return failures.Length switch { 0 => null, 1 => failures[0], _ => new AggregateException("Startup fixture failure and owned cleanup evidence.", failures) };
+        }
+    }
+
+
+    private sealed class GateReader : TextReader
+    {
+        private readonly TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool IsDisposed { get; private set; }
+        public void Release() => gate.TrySetResult();
+        public override async ValueTask<int> ReadAsync(Memory<char> buffer, CancellationToken cancellationToken = default)
+        {
+            // Deliberately ignores cancellation, proving that a cancellation request is not settlement.
+            await gate.Task;
+            return 0;
+        }
+        protected override void Dispose(bool disposing) { IsDisposed = true; base.Dispose(disposing); }
+    }
+    private sealed class FaultReader(Exception failure) : TextReader
+    {
+        public override ValueTask<int> ReadAsync(Memory<char> buffer, CancellationToken cancellationToken = default)
+            => ValueTask.FromException<int>(failure);
+    }
+
+
 }
