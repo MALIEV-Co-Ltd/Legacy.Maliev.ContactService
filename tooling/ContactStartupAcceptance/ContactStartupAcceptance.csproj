@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
@@ -15,6 +15,7 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
     <Using Include="Xunit" />
     <Compile Include="../../Legacy.Maliev.ContactService.Tests/Startup/StartupFailureAcceptanceTests.cs" Link="StartupFailureAcceptanceTests.cs" />
+    <Compile Include="../../Legacy.Maliev.ContactService.Tests/Startup/ContactRuntimeStartupHook.cs" Link="ContactRuntimeStartupHook.cs" />
     <ProjectReference Include="../../Legacy.Maliev.ContactService.Api/Legacy.Maliev.ContactService.Api.csproj" />
   </ItemGroup>
 </Project>

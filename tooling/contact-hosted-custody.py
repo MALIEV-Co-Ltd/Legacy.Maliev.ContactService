@@ -50,8 +50,8 @@ def source_pins():
         if raw != git(['show', 'HEAD:' + path]):
             raise RuntimeError('Tracked source drift before SDK admission')
         rows.append({'path': path, 'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()})
-    for directory, expected in (('Legacy.Maliev.ServiceDefaults', 'c40a7f82cea347b949444dcd7fb730f2b8dc3c0e'),
-                                ('Legacy.Maliev.CompatibilityContracts', '78e48ffc4ee000df0510cba5e7c7a3c4c4d539d7')):
+    for directory, expected in (('Legacy.Maliev.ServiceDefaults', '173d63218d9142b34075bca87f5c6d933bcbdfb6'),
+                                ('Legacy.Maliev.CompatibilityContracts', 'fe17b8cea8ace3eef5434f8b29c9038f5c975613')):
         if git(['-C', '.dependencies/' + directory, 'rev-parse', 'HEAD']).decode().strip() != expected:
             raise RuntimeError('Dependency exact pin changed')
         if git(['-C', '.dependencies/' + directory, 'status', '--porcelain', '--untracked-files=all']).strip():
