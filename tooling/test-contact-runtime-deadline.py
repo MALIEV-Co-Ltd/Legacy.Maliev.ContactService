@@ -45,6 +45,30 @@ class AdmissionTests(unittest.TestCase):
         self.assertNotEqual(observed[0][0].split('=')[-1], observed[1][0].split('=')[-1])
         self.assertTrue(all(timeout == 10 and 'Authorization' not in headers for _, timeout, headers in observed))
 
+    def test_http_error_reports_only_endpoint_and_bounded_status(self):
+        from contextlib import redirect_stderr
+        for label in ('run', 'jobs'):
+            for status in (403, 429, 700):
+                error = HTTPError('https://example.invalid/private', status, 'sensitive body', None, None)
+                output = io.StringIO()
+                with self.subTest(label=label, status=status), patch.object(deadline, 'fetch', side_effect=error), redirect_stderr(output):
+                    with self.assertRaises(HTTPError) as observed:
+                        deadline.fetch_labeled('https://example.invalid/private', label)
+                self.assertIs(error, observed.exception)
+                expected = status if status <= 599 else 'unknown'
+                self.assertEqual(f'Contact runtime metadata endpoint={label} HTTP status={expected}\n', output.getvalue())
+                error.close()
+        with self.assertRaises(ValueError):
+            deadline.fetch_labeled('https://example.invalid/private', 'unknown')
+
+    def test_stderr_failure_preserves_exact_http_error(self):
+        error = HTTPError('https://example.invalid/private', 403, 'sensitive body', None, None)
+        with patch.object(deadline, 'fetch', side_effect=error), patch.object(deadline.sys.stderr, 'write', side_effect=OSError('stderr unavailable')):
+            with self.assertRaises(HTTPError) as observed:
+                deadline.fetch_labeled('https://example.invalid/private', 'run')
+        self.assertIs(error, observed.exception)
+        error.close()
+
     def test_429_and_timeout_fail_closed(self):
         for error in (HTTPError('https://example.invalid',429,'rate limited',None,None), TimeoutError()):
             with self.subTest(error=type(error).__name__), self.assertRaises(type(error)):

@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import urllib.request
+from urllib.error import HTTPError
 import uuid
 
 ROOT = 'https://api.github.com/repos/MALIEV-Co-Ltd/Legacy.Maliev.ContactService/actions/runs/'
@@ -63,6 +64,20 @@ def evaluate(phase, run_id, attempt, job_name, runner_name, run, jobs, now):
     return int(remaining)
 
 
+def fetch_labeled(url, label):
+    if label not in ('run', 'jobs'):
+        raise ValueError('unknown metadata endpoint')
+    try:
+        return fetch(url)
+    except HTTPError as error:
+        code = error.code if type(error.code) is int and 100 <= error.code <= 599 else 'unknown'
+        try:
+            print(f'Contact runtime metadata endpoint={label} HTTP status={code}', file=sys.stderr)
+        except BaseException:
+            pass  # Diagnostic output must not replace the original HTTP error.
+        raise
+
+
 def main():
     if len(sys.argv) != 2:
         raise ValueError('missing phase')
@@ -72,8 +87,8 @@ def main():
     if os.environ['GITHUB_REPOSITORY'] != 'MALIEV-Co-Ltd/Legacy.Maliev.ContactService':
         raise ValueError('unexpected repository')
     prefix = f'{ROOT}{run_id}/attempts/{attempt}'
-    run, _ = fetch(prefix)
-    jobs, now = fetch(prefix + '/jobs?per_page=100')
+    run, _ = fetch_labeled(prefix, 'run')
+    jobs, now = fetch_labeled(prefix + '/jobs?per_page=100', 'jobs')
     remaining = evaluate(sys.argv[1], run_id, attempt, os.environ['GITHUB_JOB'],
                          os.environ['RUNNER_NAME'], run, jobs, now)
     print(f'Admitted {sys.argv[1]}: conservative remaining={remaining}s')
