@@ -1,0 +1,117 @@
+name: Contact runtime 11 compatibility
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      MalievWorkspaceRoot: ${{ github.workspace }}/.dependencies
+      DOTNET_ROLL_FORWARD: LatestMajor
+      CONTACT_REQUIRED_RUNTIME_MAJOR: '11'
+      VSTestCollect: XPlat Code Coverage
+      VSTestLogger: trx
+      VSTestResultsDirectory: ${{ github.workspace }}/runner-results
+    steps:
+      - name: Check out ContactService
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check out Legacy.Maliev.ServiceDefaults
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: MALIEV-Co-Ltd/Legacy.Maliev.ServiceDefaults
+          ref: c40a7f82cea347b949444dcd7fb730f2b8dc3c0e
+          path: .dependencies/Legacy.Maliev.ServiceDefaults
+          persist-credentials: false
+      - name: Check out Legacy.Maliev.CompatibilityContracts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: MALIEV-Co-Ltd/Legacy.Maliev.CompatibilityContracts
+          ref: 78e48ffc4ee000df0510cba5e7c7a3c4c4d539d7
+          path: .dependencies/Legacy.Maliev.CompatibilityContracts
+          persist-credentials: false
+      - name: Check out exact pinned validation source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: MALIEV-Co-Ltd/Legacy.Maliev.Workflows
+          ref: e3a6093324a24968876782153286f52db8b29fd8
+          path: .dependencies/Legacy.Maliev.Workflows
+          persist-credentials: false
+      - name: Admit preinstalled hosted SDK11
+        timeout-minutes: 1
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C .dependencies/Legacy.Maliev.Workflows rev-parse HEAD)" = e3a6093324a24968876782153286f52db8b29fd8
+          printf '%s  %s\n' 1dc4347d62fd229acc836e144cbfc49ecf648d19a5e2baeebda02e387da89941 .github/actions/contact-runtime11-validate/action.yml | sha256sum -c -
+          test -x /usr/share/dotnet/dotnet
+          test "$(/usr/share/dotnet/dotnet --version)" = 11.0.100
+          /usr/share/dotnet/dotnet --list-runtimes > "$RUNNER_TEMP/contact61-runtime-list.txt"
+          grep -Eq '^Microsoft[.]NETCore[.]App 11[.]' "$RUNNER_TEMP/contact61-runtime-list.txt"
+          grep -Eq '^Microsoft[.]AspNetCore[.]App 11[.]' "$RUNNER_TEMP/contact61-runtime-list.txt"
+          if grep -Eq '^Microsoft[.](NETCore|AspNetCore)[.]App (1[2-9]|[2-9][0-9])[.]' "$RUNNER_TEMP/contact61-runtime-list.txt"; then exit 1; fi
+          python3 -I -B tooling/test-contact-runtime-deadline.py
+          python3 -I -B tooling/contact-runtime-deadline.py validate
+          echo 'DOTNET_ROOT=/usr/share/dotnet' >> "$GITHUB_ENV"
+          echo /usr/share/dotnet >> "$GITHUB_PATH"
+      - name: Bind existing validation to owned phase admission
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          python3 -B tooling/test-contact-hosted-custody.py
+          echo "BASH_ENV=$GITHUB_WORKSPACE/tooling/contact-hosted-dotnet.sh" >> "$GITHUB_ENV"
+      - name: Validate .NET solution
+        timeout-minutes: 30
+        uses: ./.github/actions/contact-runtime11-validate
+        with:
+          solution: Legacy.Maliev.ContactService.slnx
+          dotnet-version: '11.0.x'
+          use-local-maliev-dependencies: 'true'
+      - name: Verify available shared frameworks
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(readlink -f "$(type -P dotnet)")" = /usr/share/dotnet/dotnet
+          /usr/share/dotnet/dotnet --list-sdks | tee "$RUNNER_TEMP/contact61-sdk-list.txt"
+          grep -Eq '^11[.]' "$RUNNER_TEMP/contact61-sdk-list.txt"
+          /usr/share/dotnet/dotnet --list-runtimes | tee "$RUNNER_TEMP/contact61-runtime-list.txt"
+          grep -Eq '^Microsoft[.]NETCore[.]App 11[.]' "$RUNNER_TEMP/contact61-runtime-list.txt"
+          grep -Eq '^Microsoft[.]AspNetCore[.]App 11[.]' "$RUNNER_TEMP/contact61-runtime-list.txt"
+          if grep -E '^Microsoft[.](NETCore|AspNetCore)[.]App (1[2-9]|[2-9][0-9])[.]' "$RUNNER_TEMP/contact61-runtime-list.txt"; then
+            echo 'A later shared runtime invalidates LatestMajor qualification.' >&2
+            exit 1
+          fi
+      - name: Validate safe scaffold orchestration
+        timeout-minutes: 5
+        shell: pwsh
+        run: ./tooling/Test-ContactScaffoldContract.ps1 -EvidencePath ./runner-results/contact-scaffold-orchestration.json
+      - name: Gate owned production coverage
+        timeout-minutes: 3
+        run: python3 scripts/verify-runner-coverage.py runner-results
+      - name: Preserve validation evidence
+        timeout-minutes: 2
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: contact-runtime11-${{ github.sha }}
+          path: |
+            runner-results
+            focused-results
+            ${{ runner.temp }}/contact61-runtime-list.txt
+            ${{ runner.temp }}/contact61-sdk-list.txt
+          if-no-files-found: warn
+          retention-days: 7

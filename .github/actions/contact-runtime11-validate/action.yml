@@ -1,0 +1,137 @@
+name: Validate .NET solution
+description: Restore, build, test, format-check, and audit a .NET solution without publishing artifacts.
+
+inputs:
+  solution:
+    description: Path to the solution or solution filter to validate.
+    required: true
+  working-directory:
+    description: Directory from which validation commands run.
+    required: false
+    default: .
+  dotnet-version:
+    description: .NET SDK version installed for validation.
+    required: false
+    default: 10.0.x
+  use-local-maliev-dependencies:
+    description: Set to true when sibling MALIEV projects must be resolved from the caller workspace.
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Verify hosted SDK11 remains selected
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "$(readlink -f "$(type -P dotnet)")" = /usr/share/dotnet/dotnet
+        test "$(/usr/share/dotnet/dotnet --version)" = 11.0.100
+        /usr/share/dotnet/dotnet --list-runtimes | grep -Eq '^Microsoft[.]NETCore[.]App 11[.]'
+        /usr/share/dotnet/dotnet --list-runtimes | grep -Eq '^Microsoft[.]AspNetCore[.]App 11[.]'
+
+    - name: Cache NuGet packages
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', '**/*.csproj', '**/*.props') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+
+    - name: Validate local MALIEV dependency mode
+      shell: bash
+      env:
+        USE_LOCAL_MALIEV_DEPENDENCIES_INPUT: ${{ inputs.use-local-maliev-dependencies }}
+      run: |
+        case "$USE_LOCAL_MALIEV_DEPENDENCIES_INPUT" in
+          true|false)
+            echo "USE_LOCAL_MALIEV_DEPENDENCIES=$USE_LOCAL_MALIEV_DEPENDENCIES_INPUT" >> "$GITHUB_ENV"
+            ;;
+          *)
+            echo "use-local-maliev-dependencies must be exactly 'true' or 'false'." >&2
+            exit 1
+            ;;
+        esac
+
+    - name: Install Gitleaks
+      shell: bash
+      run: |
+        go install github.com/zricethezav/gitleaks/v8@6eaad039603a4de39fddd1cf5f727391efe9974e # v8.30.0
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+    - name: Scan repository for leaked secrets
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: gitleaks git --redact --exit-code 1
+
+    - name: Scan JWT signing resources
+      shell: pwsh
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        & (Join-Path $env:GITHUB_WORKSPACE '.dependencies/Legacy.Maliev.Workflows/scripts/Invoke-JwtSigningResourceScan.ps1') -RepositoryPath (Get-Location).Path
+
+    - name: Scan tracked current-tree credentials
+      shell: pwsh
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        $runner = Join-Path $env:GITHUB_WORKSPACE '.dependencies/Legacy.Maliev.Workflows/scripts/Invoke-CurrentTreeCredentialScan.ps1'
+        if (-not (Test-Path -LiteralPath $runner -PathType Leaf)) {
+          [Console]::Error.WriteLine('[current-tree-scan] FAILED: trusted scanner unavailable; details redacted')
+          exit 2
+        }
+        & $runner -RepositoryPath (Get-Location).Path
+
+    - name: Restore
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [[ "$USE_LOCAL_MALIEV_DEPENDENCIES" == "true" ]]; then
+          export GITHUB_ACTIONS=false
+        fi
+        test "$(readlink -f "$(type -P dotnet)")" = /usr/share/dotnet/dotnet
+        test "$(/usr/share/dotnet/dotnet --version)" = 11.0.100
+        dotnet restore "${{ inputs.solution }}"
+
+    - name: Build
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [[ "$USE_LOCAL_MALIEV_DEPENDENCIES" == "true" ]]; then
+          export GITHUB_ACTIONS=false
+        fi
+        test "$(readlink -f "$(type -P dotnet)")" = /usr/share/dotnet/dotnet
+        test "$(/usr/share/dotnet/dotnet --version)" = 11.0.100
+        dotnet build "${{ inputs.solution }}" --configuration Release --no-restore
+
+    - name: Test
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [[ "$USE_LOCAL_MALIEV_DEPENDENCIES" == "true" ]]; then
+          export GITHUB_ACTIONS=false
+        fi
+        test "$(readlink -f "$(type -P dotnet)")" = /usr/share/dotnet/dotnet
+        test "$(/usr/share/dotnet/dotnet --version)" = 11.0.100
+        dotnet test "${{ inputs.solution }}" --configuration Release --no-build --no-restore
+
+    - name: Verify formatting
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [[ "$USE_LOCAL_MALIEV_DEPENDENCIES" == "true" ]]; then
+          export GITHUB_ACTIONS=false
+        fi
+        test "$(readlink -f "$(type -P dotnet)")" = /usr/share/dotnet/dotnet
+        test "$(/usr/share/dotnet/dotnet --version)" = 11.0.100
+        dotnet format "${{ inputs.solution }}" --verify-no-changes --no-restore
+
+    - name: Audit vulnerable packages
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [[ "$USE_LOCAL_MALIEV_DEPENDENCIES" == "true" ]]; then
+          export GITHUB_ACTIONS=false
+        fi
+        test "$(readlink -f "$(type -P dotnet)")" = /usr/share/dotnet/dotnet
+        test "$(/usr/share/dotnet/dotnet --version)" = 11.0.100
+        dotnet list "${{ inputs.solution }}" package --vulnerable --include-transitive --no-restore

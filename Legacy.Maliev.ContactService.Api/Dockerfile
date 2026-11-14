@@ -22,4 +22,5 @@ COPY --from=build --chown=$APP_UID:$APP_UID /app .
 USER $APP_UID
 EXPOSE 8080
 ENV ASPNETCORE_URLS=http://+:8080
+ENV DOTNET_ROLL_FORWARD=Major
 ENTRYPOINT ["dotnet", "Legacy.Maliev.ContactService.Api.dll"]
