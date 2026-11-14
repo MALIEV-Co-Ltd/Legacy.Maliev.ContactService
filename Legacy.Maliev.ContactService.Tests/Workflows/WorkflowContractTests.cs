@@ -114,8 +114,8 @@ public sealed class WorkflowContractTests
     public void BuildAndTest_RejectsCommentedDependencySha()
     {
         AssertMutationRejected(
-            "ref: c40a7f82cea347b949444dcd7fb730f2b8dc3c0e",
-            "ref: main # c40a7f82cea347b949444dcd7fb730f2b8dc3c0e");
+            "ref: 173d63218d9142b34075bca87f5c6d933bcbdfb6",
+            "ref: main # 173d63218d9142b34075bca87f5c6d933bcbdfb6");
     }
 
     /// <summary>Checks legacy ServiceDefaults references and opt-in isolation of EF design-time dependencies from normal API builds.</summary>
@@ -174,6 +174,13 @@ public sealed class WorkflowContractTests
         AssertMutationRejected(
             "          solution: Legacy.Maliev.ContactService.slnx",
             "          solution: Legacy.Maliev.ContactService.slnx\n      - run: dotnet  restore Legacy.Maliev.ContactService.slnx");
+    }
+
+    /// <summary>Checks that the required validation gate cannot silently fall back to an older SDK.</summary>
+    [Fact]
+    public void BuildAndTest_RejectsOlderValidationSdk()
+    {
+        AssertMutationRejected("          dotnet-version: '11.0.x'", "          dotnet-version: '10.0.x'");
     }
 
     /// <summary>Checks rejection when the shared validation action lacks its explicit local-dependency opt-in.</summary>
@@ -346,7 +353,7 @@ internal static partial class WorkflowContractValidator
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["repository"] = "MALIEV-Co-Ltd/Legacy.Maliev.ServiceDefaults",
-                ["ref"] = "c40a7f82cea347b949444dcd7fb730f2b8dc3c0e",
+                ["ref"] = "173d63218d9142b34075bca87f5c6d933bcbdfb6",
                 ["path"] = ".dependencies/Legacy.Maliev.ServiceDefaults",
                 ["persist-credentials"] = "false",
             });
@@ -356,7 +363,7 @@ internal static partial class WorkflowContractValidator
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["repository"] = "MALIEV-Co-Ltd/Legacy.Maliev.CompatibilityContracts",
-                ["ref"] = "78e48ffc4ee000df0510cba5e7c7a3c4c4d539d7",
+                ["ref"] = "fe17b8cea8ace3eef5434f8b29c9038f5c975613",
                 ["path"] = ".dependencies/Legacy.Maliev.CompatibilityContracts",
                 ["persist-credentials"] = "false",
             });
@@ -366,6 +373,7 @@ internal static partial class WorkflowContractValidator
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["solution"] = "Legacy.Maliev.ContactService.slnx",
+                ["dotnet-version"] = "11.0.x",
                 ["use-local-maliev-dependencies"] = "true",
             });
     }

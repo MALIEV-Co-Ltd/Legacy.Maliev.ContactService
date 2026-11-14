@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'Legacy.Maliev.ContactService.Api/Dockerfile'
+      - 'Legacy.Maliev.ContactService.*/**'
+      - 'Directory.Build.props'
       - '.github/workflows/contact-image-build.yml'
       - 'tooling/contact-image-deadline-public.py'
       - 'tooling/test-contact-image-deadline-public.py'
@@ -12,6 +14,8 @@ on:
     branches: [main]
     paths:
       - 'Legacy.Maliev.ContactService.Api/Dockerfile'
+      - 'Legacy.Maliev.ContactService.*/**'
+      - 'Directory.Build.props'
       - '.github/workflows/contact-image-build.yml'
       - 'tooling/contact-image-deadline-public.py'
       - 'tooling/test-contact-image-deadline-public.py'
@@ -35,14 +39,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: MALIEV-Co-Ltd/Legacy.Maliev.ServiceDefaults
-          ref: c40a7f82cea347b949444dcd7fb730f2b8dc3c0e
+          ref: 173d63218d9142b34075bca87f5c6d933bcbdfb6
           path: .dependencies/Legacy.Maliev.ServiceDefaults
           persist-credentials: false
       - name: Check out pinned CompatibilityContracts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: MALIEV-Co-Ltd/Legacy.Maliev.CompatibilityContracts
-          ref: 78e48ffc4ee000df0510cba5e7c7a3c4c4d539d7
+          ref: fe17b8cea8ace3eef5434f8b29c9038f5c975613
           path: .dependencies/Legacy.Maliev.CompatibilityContracts
           persist-credentials: false
       - name: Check deadline admission controls
@@ -70,8 +74,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test "$(git -C .dependencies/Legacy.Maliev.ServiceDefaults rev-parse HEAD)" = c40a7f82cea347b949444dcd7fb730f2b8dc3c0e
-          test "$(git -C .dependencies/Legacy.Maliev.CompatibilityContracts rev-parse HEAD)" = 78e48ffc4ee000df0510cba5e7c7a3c4c4d539d7
+          test "$(git -C .dependencies/Legacy.Maliev.ServiceDefaults rev-parse HEAD)" = 173d63218d9142b34075bca87f5c6d933bcbdfb6
+          test "$(git -C .dependencies/Legacy.Maliev.CompatibilityContracts rev-parse HEAD)" = fe17b8cea8ace3eef5434f8b29c9038f5c975613
           printf 'Source head=%s tree=%s\n' "$EXPECTED_HEAD" "$(git rev-parse HEAD^{tree})"
           tag="contact-image-build:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           test ! -e "$RUNNER_TEMP/contact-image-id"

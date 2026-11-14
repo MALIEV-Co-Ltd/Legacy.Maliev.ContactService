@@ -20,9 +20,9 @@ public sealed class PublishWorkflowPermissionContractTests
             ((YamlScalarNode)publish.Children[new YamlScalarNode("if")]).Value);
         var inputs = (YamlMappingNode)publish.Children[new YamlScalarNode("with")];
         Assert.Equal(8, inputs.Children.Count);
-        Assert.Equal("c40a7f82cea347b949444dcd7fb730f2b8dc3c0e",
+        Assert.Equal("173d63218d9142b34075bca87f5c6d933bcbdfb6",
             ((YamlScalarNode)inputs.Children[new YamlScalarNode("legacy-service-defaults-ref")]).Value);
-        Assert.Equal("78e48ffc4ee000df0510cba5e7c7a3c4c4d539d7",
+        Assert.Equal("fe17b8cea8ace3eef5434f8b29c9038f5c975613",
             ((YamlScalarNode)inputs.Children[new YamlScalarNode("compatibility-contracts-ref")]).Value);
     }
 
